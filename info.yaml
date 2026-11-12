@@ -1,0 +1,59 @@
+# Tiny Tapeout project information
+project:
+  title:        "JaneStreetASIC protocol emulator"      # Project title
+  author:       "Vrajesh Kumar"      # Your name
+  discord:      ""      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
+  description:  "Programmable protocol engines (UART, SPI, I2C, low-speed USB in firmware) for the Jane Street protocol emulator ASIC competition"      # One line description of what your project does
+  language:     "SystemVerilog" # other examples include SystemVerilog, Amaranth, VHDL, etc
+  clock_hz:     60000000       # Clock frequency in Hz (or 0 if not applicable)
+
+  # How many tiles your design occupies? A single tile is about 202x155 uM.
+  tiles: "8x4"          # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2, 8x2, 3x4, 4x4, 5x4, 6x4 or 8x4
+
+  # Your top module name must start with "tt_um_". Make it unique by including your github username:
+  top_module:  "tt_um_vrajeshkumar1_janestreetasic"
+
+  # List your project's source files here.
+  # Source files must be in ./src and you must list each source file separately, one per line.
+  # Don't forget to also update `PROJECT_SOURCES` in test/Makefile.
+  source_files:
+    - "project.sv"
+    - "sram_bb.v"
+
+# The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
+# This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
+# These are the pin names of the planned design (docs/spec.md, part 3). The probe build in
+# src/project.sv uses the pins differently; see the comment at the top of that file.
+pinout:
+  # Inputs
+  ui[0]: "HOST_SEL_N (host select, active low)"
+  ui[1]: "IN1 / HOST_SCK while host select is low"
+  ui[2]: "IN2 / HOST_MOSI while host select is low"
+  ui[3]: "IN3 (board UART bridge: data into the chip)"
+  ui[4]: "IN4"
+  ui[5]: "IN5"
+  ui[6]: "IN6"
+  ui[7]: "IN7"
+
+  # Outputs
+  uo[0]: "OUT0 / HOST_MISO while host select is low / optional attention line"
+  uo[1]: "OUT1"
+  uo[2]: "OUT2"
+  uo[3]: "OUT3"
+  uo[4]: "OUT4 (board UART bridge: data out of the chip)"
+  uo[5]: "OUT5"
+  uo[6]: "OUT6"
+  uo[7]: "OUT7"
+
+  # Bidirectional pins
+  uio[0]: "IO0"
+  uio[1]: "IO1"
+  uio[2]: "IO2"
+  uio[3]: "IO3"
+  uio[4]: "IO4"
+  uio[5]: "IO5"
+  uio[6]: "IO6"
+  uio[7]: "IO7"
+
+# Do not change!
+yaml_version: 6
