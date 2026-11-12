@@ -1,6 +1,7 @@
-# Specification v0.1
+# Specification v0.2
 
-Status: draft written before any RTL. Part 1 is the instruction set, part 2 the
+Status: part 1 is implemented in `src/pe_engine.sv` and tested. Part 2 (the host
+interface) is not implemented yet. Part 1 is the instruction set, part 2 the
 host interface, part 3 the pins. Where a rule was chosen without a requirement
 behind it, `docs/decisions.md` says so.
 
@@ -57,7 +58,11 @@ Each engine has its own 256-word program memory (one IHP 256 x 32 memory block).
    start of tick *n + 1*.
 7. Pin inputs pass through two flip-flops, so an engine sees a pin two clocks
    late. With the pad delays, an engine reading back its own output sees it
-   roughly three clocks after it changed.
+   roughly three clocks after it changed. A `wait` on a line the same
+   instruction has just released by side-set therefore always stalls for at
+   least one tick.
+8. Pin levels and directions are zero after reset. A program sets the
+   directions and idle levels it needs in its first instructions.
 
 ### 1.3 Instruction word
 
@@ -91,9 +96,9 @@ Operand bit positions are within bits 18:0. Unlisted bits must be zero.
 |---|---|---|---|
 | 0 | `jmp` | 18 mode, 17:14 test, 13:11 reg, 8:0 target | mode 0: jump to target if the test (section 1.6) is true. mode 1 (`tst`): `T` <- the test result, no jump |
 | 1 | `jbit` | 18 mode, 17 source, 16:14 reg, 13:10 bit, 9 value, 8:0 target | source 0: readable pin number `bit`. source 1: bit `bit` of `reg`. mode 0: jump if the bit equals `value`. mode 1 (`tbit`): `T` <- (bit equals `value`) |
-| 2 | `wait` | 18:17 kind, 16 value, 15:12 A, 11:8 B, 7 timeout enable, 6:4 timeout reg | kind 0: stall until readable pin A equals `value`. kind 1 (`wait change`): stall until pin A or pin B differs from what it was on the instruction's first tick. kind 2: stall until shared flag A equals `value`. With timeout enabled the wait also ends after `timeout reg` ticks; then `T` <- 1 if it timed out, 0 if not. `wtime` records the ticks spent |
-| 3 | `in` | 18:17 source, 16:13 pin or reg, 12:10 n-1, 9 feed | Shift n bits (1 to 8) into `isr`. source 0: a readable pin. 1: `T`. 2: the low n bits of a register. 3: zeros. `feed` = 1 also passes the bits to the checksum unit |
-| 4 | `out` | 18:17 dest, 16:13 pin or reg, 12:10 n-1, 9 feed | Shift n bits (1 to 8) out of `osr`. dest 0: a writable pin. 1: `T`. 2: a register (zero-extended). 3: discard. `feed` as for `in` |
+| 2 | `wait` | 18:17 kind, 16 value, 15:12 A, 11:8 B, 7 timeout enable, 6:4 timeout reg | kind 0: stall until readable pin A equals `value`. kind 1 (`wait change`): stall until pin A or pin B differs from what it was on the instruction's first tick, so it always takes at least two ticks. kind 2: stall until shared flag A equals `value`. With timeout enabled the wait also ends once it has stalled for `timeout reg` ticks; then `T` <- 1 if it timed out, 0 if not. `wtime` records the ticks spent stalled |
+| 3 | `in` | 18:17 source, 16:13 pin or reg, 12:10 n-1, 9 feed | Shift n bits (1 to 8) into `isr`. source 0: a readable pin. 1: `T`. 2: the low n bits of a register. 3: zeros. A pin or `T` takes n = 1. `feed` = 1 also passes the bit to the checksum unit, and needs n = 1 |
+| 4 | `out` | 18:17 dest, 16:13 pin or reg, 12:10 n-1, 9 feed | Shift n bits (1 to 8) out of `osr`. dest 0: a writable pin. 1: `T`. 2: a register (zero-extended). 3: discard. A pin or `T` takes n = 1. `feed` as for `in` |
 | 5 | `push` / `pull` | 18 direction, 17 block, 16 only-if | direction 0 `push`: RX FIFO <- `isr`, then clear `isr`. direction 1 `pull`: `osr` <- TX FIFO. block 1: stall while the FIFO is full (push) or empty (pull). only-if 1: push only when `isr` holds at least the push threshold; pull only when `osr` is empty |
 | 6 | `mov` | 18:14 dest, 13:12 operation, 11:7 source | Copy between the places in section 1.7. operation 0 copy, 1 invert, 2 reverse the low 8 bits, 3 parity: `T` <- XOR of all source bits, and the value is copied unchanged |
 | 7 | `irq` | 18:17 operation, 16:14 flag | 0 set the shared flag, 1 clear it, 2 set it and stall until something clears it |
@@ -166,8 +171,8 @@ owns (part 2, pin ownership).
 
 A 32-bit shift register with feedback, for cyclic redundancy checks of any width
 up to 32. The host sets the polynomial, the width and the direction. Each bit
-that passes through an `in` or `out` whose `feed` bit is 1 advances it by one
-step. The program reads and writes the value through `crc_lo` and `crc_hi`.
+that passes through a one-bit `in` or `out` whose `feed` bit is 1 advances it by
+one step. The program reads and writes the value through `crc_lo` and `crc_hi`.
 
 - Direction 0 (lowest bit first): `fb = crc[0] xor bit; crc = (crc >> 1) xor (fb ? poly : 0)`.
   This is the form used by USB, Ethernet, Modbus and 1-Wire, with the
@@ -218,7 +223,9 @@ label:  [ift|ifn] mnemonic operands   [side V] [[N]]   ; comment
 
 `side V` is the side-set value (0 to 3) and `[N]` the delay. Pin operands are
 written `in0`..`in7`, `out0`..`out7`, `io0`..`io7`, or a name given with
-`.define`. The programs in `programs/` use this notation.
+`.define`. Memory operands are `[rN]`, `[rN+offset]` or `[@offset]`. The
+assembler is `tools/pasm.py`; its source lists every operand form. The programs
+in `programs/` use this notation.
 
 ---
 

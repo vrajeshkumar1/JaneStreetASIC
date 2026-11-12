@@ -8,6 +8,8 @@
 .define MOSI io1
 .define MISO io2
 
+        set dir MOSI, 1                ; MOSI and SCK are outputs
+        set dir SCK, 1
 bit:    out pin MOSI, 1   side 0 [1]   ; clock low: put the bit out; waits here when nothing to send
         in pin MISO, 1    side 1       ; clock rises: sample
         jmp bit                        ; clock stays high one more tick

@@ -17,10 +17,12 @@ over some design choices.
 
 | Part | State |
 |---|---|
-| Specification (`docs/spec.md`) | v0.1 draft |
-| Example programs (`programs/`) | Paper drafts, not yet assembled |
-| Probe build (`src/project.sv`) | Passes simulation; layout run not done yet |
-| Engine, host interface, assembler | Not started |
+| Specification (`docs/spec.md`) | v0.2; part 1 implemented |
+| Assembler (`tools/pasm.py`) | Working |
+| One engine (`src/pe_engine.sv`) | Passes 18 simulation tests; not yet in the layout |
+| Example programs (`programs/`) | UART, SPI and I2C run in simulation against bus models |
+| Host interface, four-engine top level | Not started |
+| Probe build (`src/project.sv`) | Passed the layout flow; still the design the layout builds |
 
 `src/project.sv` is currently a probe, not the emulator. It places one memory
 block in the tile and exercises it, to check the layout flow before the real
@@ -35,20 +37,27 @@ design is written. The comment at the top of that file lists what it checks.
 | `docs/ai_usage.md` | Which files an AI tool wrote and how they were checked |
 | `docs/info.md` | Tiny Tapeout datasheet page |
 | `programs/` | Example protocol programs |
+| `tools/pasm.py` | Assembler |
 | `src/` | Hardware source and the layout configuration |
-| `test/` | Simulation tests (cocotb, Icarus Verilog) |
+| `test/` | Simulation tests (cocotb, Icarus Verilog); `test/engine/` holds the engine's |
 | `odb_stripes.py`, `librelane_plugin_jsasic_pdn.py` | Layout-flow step that powers the memory blocks |
 
 ## Running the tests
 
 ```
-cd test
-pip install -r requirements.txt
-make
+pip install -r test/requirements.txt
+python test/engine/run.py      # the engine: instruction and protocol tests
+cd test && make                # the probe build
 ```
 
-This needs Icarus Verilog. The memory block's simulation model is in
+Both need Icarus Verilog. The memory block's simulation model is in
 `test/ihp_sram/`, so no PDK is needed.
+
+To assemble a program and see its words and label addresses:
+
+```
+python tools/pasm.py programs/uart_tx.s
+```
 
 ## Running the layout flow
 

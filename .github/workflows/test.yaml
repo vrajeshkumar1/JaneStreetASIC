@@ -31,6 +31,9 @@ jobs:
           # make will return success even if the tests fail, so check results.xml for failed tests
           python -m cocotb_tools.check_results results.xml
 
+      - name: Run engine tests
+        run: python test/engine/run.py
+
       - name: Test Summary
         uses: test-summary/action@v2.4
         with:

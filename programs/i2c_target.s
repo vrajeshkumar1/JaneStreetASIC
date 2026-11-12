@@ -5,10 +5,11 @@
 ;           SCL and SDA marked open-drain.
 ; The host writes (device address << 1) to r7 before starting the engine.
 ; Registers: r0 bit counter, r2 register pointer, r3 byte, r4 scratch, r7 address.
-; Entry point: idle.
 .define SCL io6
 .define SDA io7
 
+        set pin SCL, 1               ; release both lines
+        set pin SDA, 1
 idle:   wait pin SDA, 1
         wait pin SDA, 0
         jbit pin SCL, 0, idle        ; SDA fell with the clock low: ordinary data
