@@ -10,6 +10,9 @@ that reads pins, writes pins and counts time precisely enough to speak a serial
 protocol. UART, SPI, I2C and low-speed USB are written as programs; none of
 them is built into the hardware.
 
+Note that the current commit is a mostly AI authored draft intended to iterate
+over some design choices.
+
 ## Status
 
 | Part | State |
