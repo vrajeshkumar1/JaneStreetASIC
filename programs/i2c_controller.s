@@ -1,7 +1,8 @@
 ; I2C controller. 6 ticks per bit (CLKDIV = 99 gives 100 kHz at 60 MHz).
 ; Each "wait pin SCL, 1" takes two ticks when nothing holds the clock low: the
 ; engine releases the line on the first and sees it high on the second. The
-; tick must be at least 4 clocks long for that to hold.
+; tick must be at least 5 clocks long for that to hold (4 for the path out
+; through the pin and back in, 1 for the delay of the pads).
 ; The host sends each command as the address of a routine below:
 ;   start, stop, write (followed by the data byte), read, ack, nack.
 ; write pushes one byte back: 0 = the target acknowledged, 1 = it did not.

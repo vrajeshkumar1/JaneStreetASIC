@@ -17,16 +17,13 @@ over some design choices.
 
 | Part | State |
 |---|---|
-| Specification (`docs/spec.md`) | v0.2; part 1 implemented |
+| Specification (`docs/spec.md`) | v0.3; all three parts implemented |
 | Assembler (`tools/pasm.py`) | Working |
-| One engine (`src/pe_engine.sv`) | Passes 18 simulation tests; not yet in the layout |
-| Example programs (`programs/`) | UART, SPI and I2C run in simulation against bus models |
-| Host interface, four-engine top level | Not started |
-| Probe build (`src/project.sv`) | Passed the layout flow; still the design the layout builds |
-
-`src/project.sv` is currently a probe, not the emulator. It places one memory
-block in the tile and exercises it, to check the layout flow before the real
-design is written. The comment at the top of that file lists what it checks.
+| Engine (`src/pe_engine.sv`) | Passes 18 simulation tests |
+| Host interface and four-engine top level (`src/project.sv`, `pe_spi.sv`, `pe_regs.sv`, `pe_pins.sv`) | Passes 12 whole-chip simulation tests, also on a gate-level netlist. Not yet through the layout flow |
+| Example programs (`programs/`) | UART, SPI and I2C run in simulation against bus models, on one engine and on four at once |
+| Layout | The probe build (one memory block, test logic) passed the flow. The four-engine design has only had a trial placement; figures in `docs/decisions.md` |
+| FPGA prototype, host script for the demo board, low-speed USB program | Not started |
 
 ## Layout of the repository
 
@@ -39,15 +36,15 @@ design is written. The comment at the top of that file lists what it checks.
 | `programs/` | Example protocol programs |
 | `tools/pasm.py` | Assembler |
 | `src/` | Hardware source and the layout configuration |
-| `test/` | Simulation tests (cocotb, Icarus Verilog); `test/engine/` holds the engine's |
+| `test/` | Simulation tests (cocotb, Icarus Verilog). `test/test.py` tests the whole chip through its pins, with the SPI host model in `test/host.py`; `test/engine/` tests one engine on its own |
 | `odb_stripes.py`, `librelane_plugin_jsasic_pdn.py` | Layout-flow step that powers the memory blocks |
 
 ## Running the tests
 
 ```
 pip install -r test/requirements.txt
-python test/engine/run.py      # the engine: instruction and protocol tests
-cd test && make                # the probe build
+python test/engine/run.py      # one engine: instruction and protocol tests
+cd test && make                # the whole chip, through its pins
 ```
 
 Both need Icarus Verilog. The memory block's simulation model is in

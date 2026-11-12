@@ -1,46 +1,50 @@
-# Sample testbench for a Tiny Tapeout project
+# Tests
 
-This is a sample testbench for a Tiny Tapeout project. It uses [cocotb](https://docs.cocotb.org/en/stable/) to drive the DUT and check the outputs.
-See below to get started or for more information, check the [website](https://tinytapeout.com/hdl/testing/).
+Simulation tests with [cocotb](https://docs.cocotb.org/en/stable/) and Icarus
+Verilog. Derived from the Tiny Tapeout template's sample testbench.
 
-## Setting up
-
-1. Edit [Makefile](Makefile) and modify `PROJECT_SOURCES` to point to your Verilog files.
-2. Edit [tb.v](tb.v) and replace `tt_um_example` with your module name.
+| File | What it is |
+|---|---|
+| `tb.v` | The whole chip plus the wires outside it |
+| `test.py` | Whole-chip tests. They reach the design only through its pins, so they also run on the gate-level netlist |
+| `host.py` | Model of the host: an SPI controller that speaks the host link of `docs/spec.md`, part 2, with helpers to load programs and settings |
+| `models.py` | Models of the other end of the wire: UART, SPI target, I2C target and controller |
+| `engine/` | Tests of one engine on its own, with direct access in place of the host link (`python test/engine/run.py`) |
+| `ihp_sram/` | The PDK's simulation model of the memory block |
 
 ## How to run
 
-To run the RTL simulation:
+RTL simulation:
 
 ```sh
 make -B
 ```
 
-To run gatelevel simulation, first harden your project and copy `../runs/wokwi/results/final/verilog/gl/{your_module_name}.v` to `gate_level_netlist.v`.
+`PROJECT_SOURCES` in `Makefile` must list the same files as `source_files` in
+`../info.yaml`.
 
-Then run:
+Gate-level simulation: the GitHub `gds` workflow runs it as its `gl_test` job.
+To run it locally, copy the gate-level netlist that the layout run produced to
+`gate_level_netlist.v` (the template's instructions give its place as
+`../runs/wokwi/results/final/verilog/gl/<top module>.v`), then
 
 ```sh
 make -B GATES=yes
 ```
 
-If you wish to save the waveform in VCD format instead of FST format, edit tb.v to use `$dumpfile("tb.vcd");` and then run:
+One test only:
 
 ```sh
-make -B FST=
+COCOTB_TEST_FILTER=test_fifos make -B
 ```
 
-This will generate `tb.vcd` instead of `tb.fst`.
-
-## How to view the waveform file
-
-Using GTKWave
+## Waveforms
 
 ```sh
 gtkwave tb.fst tb.gtkw
 ```
 
-Using Surfer
+or
 
 ```sh
 surfer tb.fst

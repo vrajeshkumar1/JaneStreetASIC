@@ -451,7 +451,7 @@ async def test_halt_and_illegal(dut):
     await FallingEdge(dut.clk)
     dut.h_prog_we.value = 1
     dut.h_prog_addr.value = 1
-    dut.h_prog_wdata.value = 0x6C000000 | (15 << 14) | (15 << 7)
+    dut.h_prog_wdata.value = 0x6C000000 | (15 << 10) | (15 << 5)   # "nop" with condition 11
     await FallingEdge(dut.clk)
     dut.h_prog_we.value = 0
     await b.start()

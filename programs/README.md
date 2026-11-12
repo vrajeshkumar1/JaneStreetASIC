@@ -2,7 +2,9 @@
 
 Five protocols written for the engine, in the notation of `docs/spec.md`,
 section 1.12. Each one is assembled with `tools/pasm.py` and run in simulation
-against a model of the other end of the wire (`test/engine/test_protocols.py`).
+against a model of the other end of the wire, on one engine
+(`test/engine/test_protocols.py`) and with four running at once on the whole
+chip (`test/test.py`).
 The figures below are measured in those tests.
 
 | File | Instructions | Registers used | Timing |

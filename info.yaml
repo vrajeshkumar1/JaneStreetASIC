@@ -18,12 +18,16 @@ project:
   # Don't forget to also update `PROJECT_SOURCES` in test/Makefile.
   source_files:
     - "project.sv"
+    - "pe_pins.sv"
+    - "pe_spi.sv"
+    - "pe_regs.sv"
+    - "pe_engine.sv"
+    - "pe_fifo.sv"
     - "sram_bb.v"
 
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
-# These are the pin names of the planned design (docs/spec.md, part 3). The probe build in
-# src/project.sv uses the pins differently; see the comment at the top of that file.
+# The pins are described in docs/spec.md, part 3.
 pinout:
   # Inputs
   ui[0]: "HOST_SEL_N (host select, active low)"

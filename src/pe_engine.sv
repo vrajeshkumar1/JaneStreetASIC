@@ -82,7 +82,8 @@ module pe_engine #(
     output wire         stalled_o,
     output wire         halted_o,
     output wire         illegal_o,
-    output wire [3:0]   debug_o,           // [0] pull found FIFO empty, [1] push found it full
+    output wire [1:0]   debug_o,           // [0] pull found FIFO empty, [1] push found it full
+    input  wire [1:0]   dbg_clr_i,         // host clears the matching debug_o bit
     output wire [31:0]  crc_o
 );
 
@@ -164,23 +165,13 @@ module pe_engine #(
   wire active = tick & ~halted_q & (delay_q == 4'd0);
   wire skip   = (cond == 2'b01 && !t_q) || (cond == 2'b10 && t_q);
 
-  // Register read ports. The register number sits in a different place in
-  // each instruction format, so the index is chosen first and the 16-bit
-  // read multiplexer is shared.
-  logic [2:0] ra_idx, rb_idx;
-  always_comb begin
-    case (op)
-      OP_JMP:           ra_idx = ir[13:11];
-      OP_JBIT:          ra_idx = ir[16:14];
-      OP_WAIT:          ra_idx = ir[6:4];
-      OP_IN, OP_OUT:    ra_idx = ir[15:13];
-      OP_MOV:           ra_idx = ir[9:7];
-      OP_ALUR, OP_ALUI: ra_idx = ir[12:10];
-      OP_LD, OP_ST:     ra_idx = ir[14:12];
-      default:          ra_idx = 3'd0;
-    endcase
-    rb_idx = (op == OP_ST) ? ir[18:16] : ir[9:7];
-  end
+  // Register read ports. Every instruction that reads a register keeps its
+  // number in the same place (bits 12:10 for the first, 9:7 for the second),
+  // so the read starts as soon as the word leaves the memory, without waiting
+  // for the opcode to be decoded. A pin number is always in bits 16:13.
+  wire [2:0] ra_idx = ir[12:10];
+  wire [2:0] rb_idx = ir[9:7];
+  wire [3:0] pin_a  = ir[16:13];
   wire [15:0] ra_val = r_q[ra_idx*16 +: 16];
   wire [15:0] rb_val = r_q[rb_idx*16 +: 16];
 
@@ -203,7 +194,7 @@ module pe_engine #(
   wire alu_lt = (ra_val < alu_b);
 
   // ------------------------------------------------------- shift helpers
-  wire [3:0] sh_n     = {1'b0, ir[12:10]} + 4'd1;       // 1..8 bits
+  wire [3:0] sh_n     = {1'b0, ir[8:6]} + 4'd1;         // 1..8 bits
   wire [7:0] sh_mask  = 8'hFF >> (4'd8 - sh_n);
   wire       osr_empty = (osr_cnt_q >= cfg_pull_thresh_i);
 
@@ -217,7 +208,7 @@ module pe_engine #(
   logic [7:0] in_bits;
   always_comb begin
     case (ir[18:17])
-      2'd0:    in_bits = {8{pins_i[ir[16:13]]}};
+      2'd0:    in_bits = {8{pins_i[pin_a]}};
       2'd1:    in_bits = {8{t_q}};
       2'd2:    in_bits = ra_val[7:0];
       default: in_bits = 8'h00;
@@ -235,7 +226,7 @@ module pe_engine #(
   logic        mov_src_bad;
   always_comb begin
     mov_src_bad = 1'b0;
-    case (ir[11:7])
+    case (ir[14:10])
       5'd0, 5'd1, 5'd2, 5'd3, 5'd4, 5'd5, 5'd6, 5'd7: mov_src = ra_val;
       5'd8:    mov_src = {8'd0, isr_q};
       5'd9:    mov_src = {8'd0, osr_q};
@@ -257,7 +248,7 @@ module pe_engine #(
   end
   logic [15:0] mov_val;
   always_comb begin
-    case (ir[13:12])
+    case (ir[18:17])
       2'd1:    mov_val = ~mov_src;
       2'd2:    mov_val = {8'd0, mov_src[0], mov_src[1], mov_src[2], mov_src[3],
                           mov_src[4], mov_src[5], mov_src[6], mov_src[7]};
@@ -266,7 +257,7 @@ module pe_engine #(
   end
 
   // --------------------------------------------------------- data memory
-  wire [3:0]  dm_addr = (ir[15] ? ra_val[3:0] : 4'd0) + ir[11:8];
+  wire [3:0]  dm_addr = (ir[6] ? ra_val[3:0] : 4'd0) + ir[3:0];
   wire [7:0]  dm_rd   = dm_q[dm_addr*8 +: 8];
   assign dm_rdata_o   = dm_q[dm_addr_i*8 +: 8];
 
@@ -308,7 +299,7 @@ module pe_engine #(
     level_d    = level_q;
     dir_d      = dir_q;
     crc_d      = crc_q;
-    dbg_d      = dbg_q;
+    dbg_d      = dbg_q & ~dbg_clr_i;
 
     stall        = 1'b0;
     taken        = 1'b0;
@@ -332,7 +323,7 @@ module pe_engine #(
     tmo          = 1'b0;
     first        = ~stall_q;
     wt           = stall_q ? wtime_q : 16'd0;
-    wpins        = {pins_i[ir[11:8]], pins_i[ir[15:12]]};
+    wpins        = {pins_i[ir[7:4]], pins_i[pin_a]};
 
     if (active && cond == 2'b11) begin
       bad = 1'b1;
@@ -369,7 +360,7 @@ module pe_engine #(
 
         // ---------------------------------------------- jbit / tbit
         OP_JBIT: begin
-          bitval = ir[17] ? ra_val[ir[13:10]] : pins_i[ir[13:10]];
+          bitval = ir[17] ? ra_val[pin_a] : pins_i[pin_a];
           test   = (bitval == ir[9]);
           if (ir[18]) t_d = test;
           else taken = test;
@@ -378,17 +369,17 @@ module pe_engine #(
         // ------------------------------------------------------ wait
         OP_WAIT: begin
           case (ir[18:17])
-            2'd0: met = (pins_i[ir[15:12]] == ir[16]);
+            2'd0: met = (pins_i[pin_a] == ir[8]);
             2'd1: begin
               if (first) snap_d = wpins;
               else met = (wpins != snap_q);
             end
-            2'd2: met = (flags_i[ir[14:12]] == ir[16]);
+            2'd2: met = (flags_i[ir[15:13]] == ir[8]);
             default: bad = 1'b1;
           endcase
-          tmo = ir[7] && (wt == ra_val);
+          tmo = ir[9] && (wt == ra_val);
           if (met) begin
-            if (ir[7]) t_d = 1'b0;
+            if (ir[9]) t_d = 1'b0;
             wtime_d = wt;
           end else if (tmo) begin
             t_d     = 1'b1;
@@ -435,11 +426,11 @@ module pe_engine #(
             crc_step = ir[9];
             crc_bit  = out_bits[0];
             case (ir[18:17])
-              2'd0: level_d[ir[16:13]] = out_bits[0];
+              2'd0: level_d[pin_a] = out_bits[0];
               2'd1: t_d = out_bits[0];
               2'd2: begin
                 rw_en   = 1'b1;
-                rw_idx  = ir[15:13];
+                rw_idx  = ir[12:10];
                 rw_data = {8'd0, out_bits};
               end
               default: ;
@@ -489,11 +480,11 @@ module pe_engine #(
         // ------------------------------------------------------- mov
         OP_MOV: begin
           bad = mov_src_bad;
-          if (ir[13:12] == 2'd3) t_d = ^mov_src;
-          case (ir[18:14])
+          if (ir[18:17] == 2'd3) t_d = ^mov_src;
+          case (ir[9:5])
             5'd0, 5'd1, 5'd2, 5'd3, 5'd4, 5'd5, 5'd6, 5'd7: begin
               rw_en   = 1'b1;
-              rw_idx  = ir[16:14];
+              rw_idx  = ir[7:5];
               rw_data = mov_val;
             end
             5'd8: begin
@@ -522,13 +513,13 @@ module pe_engine #(
         // ------------------------------------------------------- irq
         OP_IRQ: begin
           case (ir[18:17])
-            2'd0: flag_set_o[ir[16:14]] = 1'b1;
-            2'd1: flag_clr_o[ir[16:14]] = 1'b1;
+            2'd0: flag_set_o[ir[15:13]] = 1'b1;
+            2'd1: flag_clr_o[ir[15:13]] = 1'b1;
             2'd2: begin
               if (first) begin
-                flag_set_o[ir[16:14]] = 1'b1;
+                flag_set_o[ir[15:13]] = 1'b1;
                 stall = 1'b1;
-              end else if (flags_i[ir[16:14]]) begin
+              end else if (flags_i[ir[15:13]]) begin
                 stall = 1'b1;
               end
             end
@@ -558,7 +549,7 @@ module pe_engine #(
         // --------------------------------------------------- ld / st
         OP_LD: begin
           rw_en   = 1'b1;
-          rw_idx  = ir[18:16];
+          rw_idx  = ir[15:13];
           rw_data = {8'd0, dm_rd};
         end
         OP_ST: dm_we = 1'b1;
@@ -573,8 +564,8 @@ module pe_engine #(
         // ------------------------------------------------------- pin
         OP_PIN: begin
           case (ir[18:17])
-            2'd0: level_d[ir[16:13]] = ir[12];
-            2'd1: level_d[ir[16:13]] = ~level_q[ir[16:13]];
+            2'd0: level_d[pin_a] = ir[12];
+            2'd1: level_d[pin_a] = ~level_q[pin_a];
             2'd2: if (ir[16]) dir_d[ir[15:13]] = ir[12];
             default: bad = 1'b1;
           endcase
@@ -734,7 +725,7 @@ module pe_engine #(
   assign stalled_o    = stall_q;
   assign halted_o     = halted_q;
   assign illegal_o    = illegal_q;
-  assign debug_o      = {2'b00, dbg_q};
+  assign debug_o      = dbg_q;
   assign crc_o        = crc_q;
 
 endmodule

@@ -7,7 +7,7 @@ SIM ?= icarus
 FST ?= -fst # Use more efficient FST format
 TOPLEVEL_LANG ?= verilog
 SRC_DIR = $(PWD)/../src
-PROJECT_SOURCES = project.sv sram_bb.v
+PROJECT_SOURCES = project.sv pe_pins.sv pe_spi.sv pe_regs.sv pe_engine.sv pe_fifo.sv sram_bb.v
 
 # The PDK's behavioural models of the memory block, copied into ihp_sram/ so
 # the GitHub jobs (which have no PDK checkout) can simulate it. The gate-level

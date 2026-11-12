@@ -1,50 +1,39 @@
 {
   "//": "LibreLane configuration. Base: the Tiny Tapeout CMOS5L template (Apache-2.0). Changes from the template are marked with a //<name> comment key next to them. See NOTICE.md for the origin of the memory-block settings.",
-
-  "//meta": "Adds one step after the power-grid generator: it runs the tile's Metal4 power stripes across the memory block so the block is powered. The step is in librelane_plugin_jsasic_pdn.py and odb_stripes.py at the repository root.",
+  "//meta": "Adds one step after the power-grid generator: it runs the tile's Metal4 power stripes across the memory blocks so they are powered. The step is in librelane_plugin_jsasic_pdn.py and odb_stripes.py at the repository root.",
   "meta": {
     "flow": "Classic",
     "substituting_steps": {
       "+OpenROAD.GeneratePDN": "Project.ExtendPowerStripes"
     }
   },
-
   "PL_TARGET_DENSITY_PCT": 60,
 
   "//clock": "16.66 ns = 60 MHz, the project's target clock.",
   "CLOCK_PERIOD": 16.66,
-
   "PL_RESIZER_HOLD_SLACK_MARGIN": 0.1,
   "GRT_RESIZER_HOLD_SLACK_MARGIN": 0.05,
-
   "RUN_LINTER": 1,
   "LINTER_INCLUDE_PDK_MODELS": 1,
-
   "CLOCK_PORT": "clk",
-
   "RUN_KLAYOUT_XOR": 0,
-
   "DESIGN_REPAIR_BUFFER_OUTPUT_PORTS": 0,
-
   "TOP_MARGIN_MULT": 1,
   "BOTTOM_MARGIN_MULT": 1,
   "LEFT_MARGIN_MULT": 6,
   "RIGHT_MARGIN_MULT": 6,
-
   "FP_SIZING": "absolute",
-
   "GRT_ALLOW_CONGESTION": 1,
-
   "FP_IO_HLENGTH": 2,
   "FP_IO_VLENGTH": 2,
 
-  "//pdn": "Power stripes matched to the memory block's supply columns (11.24 um pitch, VDD and VSS 5.62 um apart). Width 2.1 + spacing 3.52 = 5.62; pitch 44.96 = 4 x 11.24; offset 6.15 puts the first VPWR stripe centre at x = 9.03, which is the first supply column of a block placed at x = 3.36. Template values were pitch 50.0, width 2.1.",
+  "//pdn": "Power stripes matched to the memory block's supply columns (11.24 um pitch, VDD and VSS 5.62 um apart). Width 2.1 + spacing 3.52 = 5.62; pitch 44.96 = 4 x 11.24; offset 6.15 puts the first VPWR stripe centre at x = 9.03, which is the first supply column of a block placed at x = 3.36 (or 3.36 plus a whole number of pitches). Template values were pitch 50.0, width 2.1.",
   "FP_PDN_VPITCH": 44.96,
   "FP_PDN_VWIDTH": 2.1,
   "FP_PDN_VSPACING": 3.52,
   "FP_PDN_VOFFSET": 6.15,
 
-  "//pdn_cfg": "LibreLane's power-grid script without its per-block grid, which has no shapes on a single-layer grid and makes the generator fail. The block gets its power from Project.ExtendPowerStripes instead.",
+  "//pdn_cfg": "LibreLane's power-grid script without its per-block grid, which has no shapes on a single-layer grid and makes the generator fail. The blocks get their power from Project.ExtendPowerStripes instead.",
   "PDN_CFG": "dir::pdn_cfg.tcl",
   "ERROR_ON_PDN_VIOLATIONS": 0,
 
@@ -52,25 +41,22 @@
   "EXTEND_STRIPES_SRAM_ALL_COLUMNS": false,
   "EXTEND_STRIPES_SRAM_ARRAY_EVERY_OTHER": true,
   "EXTEND_STRIPES_PIN_FACE_MARGIN": 0,
-
   "RUN_CTS": 1,
-
   "FP_PDN_MULTILAYER": 0,
-
   "MAGIC_DEF_LABELS": 0,
   "MAGIC_WRITE_LEF_PINONLY": 1,
 
-  "//halo": "Keeps standard cells away from the memory block's edge.",
+  "//halo": "Keeps standard cells away from the memory blocks' edges.",
   "FP_MACRO_HORIZONTAL_HALO": 2.0,
   "FP_MACRO_VERTICAL_HALO": 0.48,
 
-  "//drc": "Magic reads the memory block from its abstract and reports the power stripes crossing it as overlaps. DRC is done by KLayout with the CMOS5L deck instead, which sees the real layout.",
+  "//drc": "Magic reads the memory blocks from their abstract and reports the power stripes crossing them as overlaps. DRC is done by KLayout with the CMOS5L deck instead, which sees the real layout.",
   "RUN_MAGIC_DRC": 0,
   "ERROR_ON_ILLEGAL_OVERLAPS": 0,
   "RUN_KLAYOUT_DRC": 1,
   "KLAYOUT_DRC_RUNSET": "pdk_dir::libs.tech/klayout/tech/drc/ihp-sg13cmos5l.drc",
 
-  "//macros": "One IHP single-port 256 x 32 memory block (416.64 x 118.78 um) at the bottom left. Orientation FS puts its pin edge on top, facing the logic. Corner names are LibreLane's; the block's fast corner was characterized at -55 C.",
+  "//macros": "Four IHP single-port 256 x 32 memory blocks (416.64 x 118.78 um each), one per engine: two on the bottom edge (orientation FS, pin edge on top) and two on the top edge (orientation N, pin edge at the bottom), so every pin edge faces the logic. The top-left block starts at x = 273.12 to leave the tile's own pins (top edge, x = 30 to 191) clear. Every x is 3.36 + 134.88 * k: 134.88 um is 3 power-stripe pitches (44.96) and 281 routing tracks (0.48), so each block sits on the stripes and on the routing grid exactly as the block at x = 3.36 did in the probe build. Every y is a multiple of the 3.78 um row height. Corner names are LibreLane's; the block's fast corner was characterized at -55 C.",
   "MACROS": {
     "RM_IHPSG13_1P_256x32_c2_bm_bist": {
       "gds": [
@@ -96,24 +82,51 @@
         ]
       },
       "instances": {
-        "u_mem": {
+        "u_mem0": {
           "location": [3.36, 3.78],
           "orientation": "FS"
+        },
+        "u_mem1": {
+          "location": [1217.28, 3.78],
+          "orientation": "FS"
+        },
+        "u_mem2": {
+          "location": [273.12, 585.9],
+          "orientation": "N"
+        },
+        "u_mem3": {
+          "location": [1217.28, 585.9],
+          "orientation": "N"
         }
       }
     }
   },
 
-  "//pdn_connect": "Tells the power-grid tools that the block's VDD!, VDDARRAY! and VSS! pins are the tile's VPWR and VGND.",
+  "//pdn_connect": "Tells the power-grid tools that each block's VDD!, VDDARRAY! and VSS! pins are the tile's VPWR and VGND.",
   "PDN_MACRO_CONNECTIONS": [
-    "u_mem VPWR VGND VDD! VSS!",
-    "u_mem VPWR VGND VDDARRAY! VSS!"
+    "u_mem0 VPWR VGND VDD! VSS!",
+    "u_mem0 VPWR VGND VDDARRAY! VSS!",
+    "u_mem1 VPWR VGND VDD! VSS!",
+    "u_mem1 VPWR VGND VDDARRAY! VSS!",
+    "u_mem2 VPWR VGND VDD! VSS!",
+    "u_mem2 VPWR VGND VDDARRAY! VSS!",
+    "u_mem3 VPWR VGND VDD! VSS!",
+    "u_mem3 VPWR VGND VDDARRAY! VSS!"
   ],
 
-  "//obstructions": "No signal routing across the memory block on any routing layer (the tile routes on Metal2 to Metal4 only). Rectangle = block footprint: x 3.36..420.0, y 3.78..122.56.",
+  "//obstructions": "No signal routing across the memory blocks on any routing layer (the tile routes on Metal2 to Metal4 only). One rectangle per block and layer, equal to the block's footprint.",
   "ROUTING_OBSTRUCTIONS": [
     "Metal2 3.36 3.78 420.0 122.56",
     "Metal3 3.36 3.78 420.0 122.56",
-    "Metal4 3.36 3.78 420.0 122.56"
+    "Metal4 3.36 3.78 420.0 122.56",
+    "Metal2 1217.28 3.78 1633.92 122.56",
+    "Metal3 1217.28 3.78 1633.92 122.56",
+    "Metal4 1217.28 3.78 1633.92 122.56",
+    "Metal2 273.12 585.9 689.76 704.68",
+    "Metal3 273.12 585.9 689.76 704.68",
+    "Metal4 273.12 585.9 689.76 704.68",
+    "Metal2 1217.28 585.9 1633.92 704.68",
+    "Metal3 1217.28 585.9 1633.92 704.68",
+    "Metal4 1217.28 585.9 1633.92 704.68"
   ]
 }

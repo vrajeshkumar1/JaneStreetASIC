@@ -3,10 +3,17 @@
 """The five example programs in programs/, each run against a model of the
 other end of the wire."""
 
+import os
+import sys
+
 import cocotb
 from cocotb.triggers import ClockCycles, RisingEdge
 
 from bench import Bench
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from host import Wires  # noqa: E402
+from models import SCL, I2CControllerModel, I2CTargetModel  # noqa: E402
 
 # ------------------------------------------------------------------- UART
 
@@ -160,155 +167,6 @@ async def test_spi_controller(dut):
 
 # -------------------------------------------------------------------- I2C
 
-SCL, SDA = 6, 7
-
-
-class I2CWire:
-    """The two open-drain lines as the outside world sees them."""
-
-    def __init__(self, dut):
-        self.dut = dut
-        # Keep our own copy of what we drive: a value written to the simulator
-        # cannot be read back until the next time step.
-        self.ext = 0xFF
-        dut.io_ext.value = self.ext
-
-    def scl(self):
-        return (int(self.dut.io_line.value) >> SCL) & 1
-
-    def sda(self):
-        return (int(self.dut.io_line.value) >> SDA) & 1
-
-    def pull(self, bit, low):
-        self.ext = (self.ext & ~(1 << bit)) if low else (self.ext | (1 << bit))
-        self.dut.io_ext.value = self.ext
-
-
-class I2CTargetModel:
-    """A register-map device on the bus, for testing the controller program."""
-
-    def __init__(self, dut, address):
-        self.w = I2CWire(dut)
-        self.dut = dut
-        self.address = address
-        self.mem = {}
-        self.pointer = 0
-        self.log = []
-        self.stretch_clocks = 0
-
-    async def _edge(self):
-        """Wait for the next change on either line. Returns 'start', 'stop', 'rise' or 'fall'."""
-        scl, sda = self.w.scl(), self.w.sda()
-        while True:
-            await RisingEdge(self.dut.clk)
-            nscl, nsda = self.w.scl(), self.w.sda()
-            if scl and nscl and sda and not nsda:
-                return "start"
-            if scl and nscl and not sda and nsda:
-                return "stop"
-            if not scl and nscl:
-                return "rise"
-            if scl and not nscl:
-                return "fall"
-            scl, sda = nscl, nsda
-
-    async def _byte(self):
-        """Receive 8 bits. Returns the byte, or 'start' / 'stop'."""
-        value = 0
-        for _ in range(8):
-            while True:
-                e = await self._edge()
-                if e in ("start", "stop"):
-                    return e
-                if e == "rise":
-                    value = (value << 1) | self.w.sda()
-                    break
-            while True:
-                e = await self._edge()
-                if e in ("start", "stop"):
-                    return e
-                if e == "fall":
-                    break
-        return value
-
-    async def _ack(self, ack=True):
-        self.w.pull(SDA, ack)
-        if self.stretch_clocks:
-            self.w.pull(SCL, True)
-            await ClockCycles(self.dut.clk, self.stretch_clocks)
-            self.w.pull(SCL, False)
-        while await self._edge() != "rise":
-            pass
-        while await self._edge() != "fall":
-            pass
-        self.w.pull(SDA, False)
-
-    async def _send(self, byte):
-        for i in range(8):
-            self.w.pull(SDA, not ((byte >> (7 - i)) & 1))
-            while await self._edge() != "rise":
-                pass
-            while await self._edge() != "fall":
-                pass
-        self.w.pull(SDA, False)
-        while await self._edge() != "rise":
-            pass
-        nack = self.w.sda()
-        while True:
-            e = await self._edge()
-            if e == "fall":
-                break
-            if e in ("start", "stop"):
-                return e
-        return "nack" if nack else "ack"
-
-    async def run(self):
-        state = "idle"
-        while True:
-            if state == "idle":
-                while await self._edge() != "start":
-                    pass
-                state = "address"
-            if state == "address":
-                self.log.append("start")
-                while await self._edge() != "fall":
-                    pass
-                first = await self._byte()
-                if first in ("start", "stop"):
-                    state = "address" if first == "start" else "idle"
-                    continue
-                if first >> 1 != self.address:
-                    state = "idle"
-                    continue
-                await self._ack()
-                if first & 1:
-                    while True:
-                        r = await self._send(self.mem.get(self.pointer, 0xEE))
-                        self.pointer = (self.pointer + 1) & 0xFF
-                        if r != "ack":
-                            break
-                    state = "address" if r == "start" else "idle"
-                    if r == "stop":
-                        self.log.append("stop")
-                    continue
-                got_pointer = False
-                while True:
-                    value = await self._byte()
-                    if value == "start":
-                        state = "address"
-                        break
-                    if value == "stop":
-                        self.log.append("stop")
-                        state = "idle"
-                        break
-                    if not got_pointer:
-                        self.pointer, got_pointer = value, True
-                    else:
-                        self.mem[self.pointer] = value
-                        self.pointer = (self.pointer + 1) & 0xFF
-                    await self._ack()
-
-
 @cocotb.test()
 async def test_i2c_controller(dut):
     """i2c_controller.s against a register-map device: write, read back with a
@@ -319,7 +177,8 @@ async def test_i2c_controller(dut):
     clkdiv = 9                                   # 10 clocks per tick, 60 per bit
     b.settings(clkdiv=clkdiv, out_dir=1, in_dir=1, side0="io6", open_drain=["io6", "io7"])
     L = b.labels
-    device = I2CTargetModel(dut, 0x50)
+    wires = Wires(dut, ui=0xFF)
+    device = I2CTargetModel(wires, 0x50)
     cocotb.start_soon(device.run())
     await b.start()
 
@@ -375,14 +234,13 @@ async def test_i2c_controller(dut):
     device.stretch_clocks = 0
 
     # Clock timing inside a byte: 6 ticks per bit, high for 3 and low for 3.
-    w = I2CWire(dut)
     await cmd("start")
     await cmd("write", 0xA0)
-    rises, falls, clock, last = [], [], 0, w.scl()
+    rises, falls, clock, last = [], [], 0, wires.io(SCL)
     while len(rises) < 8:
         await RisingEdge(dut.clk)
         clock += 1
-        now = w.scl()
+        now = wires.io(SCL)
         if now != last:
             (rises if now else falls).append(clock)
             last = now
@@ -390,63 +248,6 @@ async def test_i2c_controller(dut):
     assert {rises[i + 1] - rises[i] for i in range(1, 7)} == {6 * tick}
     high = {f - r for r, f in zip(rises[1:7], [f for f in falls if f > rises[1]])}
     assert high == {3 * tick}, f"clock high time {high}"
-
-
-class I2CControllerModel:
-    """Bit-banged controller on the bus, for testing the target program."""
-
-    def __init__(self, dut, half_clocks):
-        self.w = I2CWire(dut)
-        self.dut = dut
-        self.h = half_clocks
-
-    async def _t(self, n=1):
-        await ClockCycles(self.dut.clk, self.h * n)
-
-    async def start(self):
-        self.w.pull(SDA, False)
-        await self._t()
-        self.w.pull(SCL, False)
-        await self._t()
-        self.w.pull(SDA, True)
-        await self._t()
-        self.w.pull(SCL, True)
-        await self._t()
-
-    async def stop(self):
-        self.w.pull(SDA, True)
-        await self._t()
-        self.w.pull(SCL, False)
-        await self._t()
-        self.w.pull(SDA, False)
-        await self._t()
-
-    async def _clock(self):
-        """One clock pulse; returns SDA sampled while the clock is high."""
-        await self._t()
-        self.w.pull(SCL, False)
-        await self._t()
-        bit = self.w.sda()
-        self.w.pull(SCL, True)
-        return bit
-
-    async def write(self, byte):
-        for i in range(8):
-            self.w.pull(SDA, not ((byte >> (7 - i)) & 1))
-            await self._clock()
-        self.w.pull(SDA, False)
-        nack = await self._clock()
-        return not nack
-
-    async def read(self, ack):
-        value = 0
-        self.w.pull(SDA, False)
-        for _ in range(8):
-            value = (value << 1) | await self._clock()
-        self.w.pull(SDA, ack)
-        await self._clock()
-        self.w.pull(SDA, False)
-        return value
 
 
 @cocotb.test()
@@ -463,7 +264,7 @@ async def test_i2c_target(dut):
     await b.start()
     await ClockCycles(dut.clk, 20)
 
-    c = I2CControllerModel(dut, half_clocks=75)      # 150 clocks per bit = 400 kHz
+    c = I2CControllerModel(Wires(dut, ui=0xFF), half_clocks=75)      # 150 clocks per bit = 400 kHz
 
     # Another device's address: no acknowledge, memory untouched.
     await c.start()

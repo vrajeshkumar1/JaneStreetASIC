@@ -225,7 +225,7 @@ class _Asm:
                 tgt = self._target(ops[1])
             else:
                 raise AsmError("jmp [TEST,] label")
-            return OP["jmp"], (mode << 18) | (code << 14) | (reg << 11) | tgt
+            return OP["jmp"], (mode << 18) | (code << 14) | (reg << 10) | tgt
 
         if mnem in ("jbit", "tbit"):
             mode = 1 if mnem == "tbit" else 0
@@ -234,7 +234,7 @@ class _Asm:
             src, reg, bit = self._bit_src(ops[0])
             val = self._val(ops[1], 1)
             tgt = 0 if mode else self._target(ops[2])
-            return OP["jbit"], (mode << 18) | (src << 17) | (reg << 14) | (bit << 10) | (val << 9) | tgt
+            return OP["jbit"], (mode << 18) | (src << 17) | (bit << 13) | (reg << 10) | (val << 9) | tgt
 
         if mnem == "wait":
             tmo_en, tmo_reg = 0, 0
@@ -244,18 +244,19 @@ class _Asm:
                 n -= 1
             if not ops:
                 raise AsmError("wait pin P, v | wait change A[, B] | wait flag N, v")
+            tmo = (tmo_reg << 10) | (tmo_en << 9)
             first = ops[0].split()
             kind = first[0]
             if kind == "pin" and n == 2:
                 a = self._pin(first[1], write=False)
-                return OP["wait"], (0 << 17) | (self._val(ops[1], 1) << 16) | (a << 12) | (tmo_en << 7) | (tmo_reg << 4)
+                return OP["wait"], (0 << 17) | (a << 13) | tmo | (self._val(ops[1], 1) << 8)
             if kind == "change" and n in (1, 2):
                 a = self._pin(first[1], write=False)
                 b = self._pin(ops[1], write=False) if n == 2 else a
-                return OP["wait"], (1 << 17) | (a << 12) | (b << 8) | (tmo_en << 7) | (tmo_reg << 4)
+                return OP["wait"], (1 << 17) | (a << 13) | tmo | (b << 4)
             if kind == "flag" and n == 2:
                 f = self._val(first[1], 3)
-                return OP["wait"], (2 << 17) | (self._val(ops[1], 1) << 16) | (f << 12) | (tmo_en << 7) | (tmo_reg << 4)
+                return OP["wait"], (2 << 17) | (f << 13) | tmo | (self._val(ops[1], 1) << 8)
             raise AsmError("wait pin P, v | wait change A[, B] | wait flag N, v   [, timeout rN]")
 
         if mnem in ("in", "out"):
@@ -272,11 +273,11 @@ class _Asm:
             where = ops[0]
             p = self._split_kw(where, "pin")
             if p is not None:
-                kind, fld = 0, self._pin(p, write=(mnem == "out"))
+                kind, fld = 0, self._pin(p, write=(mnem == "out")) << 13
             elif where == "t":
                 kind, fld = 1, 0
             elif _is_reg(where):
-                kind, fld = 2, _reg(where)
+                kind, fld = 2, _reg(where) << 10
             elif where in ("zeros", "null"):
                 kind, fld = 3, 0
             else:
@@ -286,7 +287,7 @@ class _Asm:
             if feed and bits != 1:
                 raise AsmError("feed needs a bit count of 1")
             op = OP["inp"] if mnem == "in" else OP["out"]
-            return op, (kind << 17) | (fld << 13) | ((bits - 1) << 10) | (feed << 9)
+            return op, (kind << 17) | fld | (feed << 9) | ((bits - 1) << 6)
 
         if mnem in ("push", "pull"):
             flags = " ".join(ops).split()
@@ -314,7 +315,7 @@ class _Asm:
                 if ops[2] not in MOV_OP:
                     raise AsmError("mov: third operand must be inv, rev or par")
                 mop = MOV_OP[ops[2]]
-            return OP["mov"], (dst << 14) | (mop << 12) | (src << 7)
+            return OP["mov"], (mop << 17) | (src << 10) | (dst << 5)
 
         if mnem == "irq":
             if n != 1 or len(ops[0].split()) != 2:
@@ -323,7 +324,7 @@ class _Asm:
             code = {"set": 0, "clear": 1, "wait": 2}.get(what)
             if code is None:
                 raise AsmError("irq set N | irq clear N | irq wait N")
-            return OP["irq"], (code << 17) | (self._val(f, 3) << 14)
+            return OP["irq"], (code << 17) | (self._val(f, 3) << 13)
 
         if mnem == "set":
             if n != 2:
@@ -363,7 +364,8 @@ class _Asm:
             if n != 2:
                 raise AsmError(f"{mnem} rN, [rB] | [rB+off] | [@off]")
             use, base, off = self._mem(ops[1])
-            return OP[mnem], (_reg(ops[0]) << 16) | (use << 15) | (base << 12) | (off << 8)
+            reg = _reg(ops[0]) << (13 if mnem == "ld" else 7)
+            return OP[mnem], reg | (base << 10) | (use << 6) | off
 
         if mnem == "call":
             if n != 1:

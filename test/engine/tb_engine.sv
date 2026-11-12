@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT
 //
 // Test bench for one engine. It supplies what the rest of the chip will
-// supply later: the program memory block, the settings registers, the shared
-// flags, the input synchronizers and the pin drivers (including open-drain
-// pins with pull-ups). The cocotb tests drive the "h_" signals in place of the
+// supply: the program memory block, the settings registers, the shared flags,
+// the input synchronizers and the pin drivers (including open-drain pins with
+// pull-ups). The cocotb tests drive the "h_" signals in place of the
 // host interface.
 
 `default_nettype none
@@ -55,7 +55,7 @@ module tb_engine ();
   wire [7:0]  rx_data, dm_rdata, pc;
   wire [15:0] reg_rdata;
   wire        stalled, halted, illegal;
-  wire [3:0]  debug;
+  wire [1:0]  debug;
   wire [31:0] crc;
 
   // ---- pins
@@ -68,9 +68,23 @@ module tb_engine ();
   wire [15:0] pin_level;
   wire [7:0]  pin_dir;
 
+  // Pin drivers as in src/pe_pins.sv: one flip-flop on every output.
   // Open-drain pin: never driven high. Level 1 releases, level 0 pulls low.
-  wire [7:0] io_oe  = (cfg_open_drain & ~pin_level[15:8]) | (~cfg_open_drain & pin_dir);
-  wire [7:0] io_out = pin_level[15:8] & ~cfg_open_drain;
+  wire [7:0] io_oe_d  = (cfg_open_drain & ~pin_level[15:8]) | (~cfg_open_drain & pin_dir);
+  wire [7:0] io_out_d = pin_level[15:8] & ~cfg_open_drain;
+
+  reg [7:0] uo_q, io_oe, io_out;
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      uo_q   <= 8'h00;
+      io_oe  <= 8'h00;
+      io_out <= 8'h00;
+    end else begin
+      uo_q   <= pin_level[7:0];
+      io_oe  <= io_oe_d;
+      io_out <= io_out_d;
+    end
+  end
 
   genvar g;
   generate
@@ -79,7 +93,7 @@ module tb_engine ();
     end
   endgenerate
 
-  assign uo_out = pin_level[7:0];
+  assign uo_out = uo_q;
 
   // Two flip-flops on every input, as the chip will have.
   reg [15:0] pins_meta, pins_sync;
@@ -177,6 +191,7 @@ module tb_engine ();
       .halted_o         (halted),
       .illegal_o        (illegal),
       .debug_o          (debug),
+      .dbg_clr_i        (2'b00),
       .crc_o            (crc)
   );
 
