@@ -15,8 +15,8 @@
   "//routability": "Off. When on, global placement inflates cells wherever it predicts routing congestion; on this tile it predicted congestion nearly everywhere, inflated the cells by 76% and left no legal position for the last ones (the first four-engine run stopped with 'Detailed placement failed'). Spreading the cells also lengthens the wires, which is the opposite of what the shortage of Metal3 needs.",
   "PL_ROUTABILITY_DRIVEN": false,
 
-  "//drt": "Stop detailed routing after 12 passes instead of 64. In a local trial of one engine the violation count was down to 2 by pass 8; one that is not would otherwise run into the 6-hour job limit.",
-  "DRT_OPT_ITERS": 12,
+  "//drt": "Run 50 passes since being done on a GCP 88 vCPU instance, and 12 passes were insufficient to meet timing.",
+  "DRT_OPT_ITERS": 50,
 
   "//clock": "16.66 ns = 60 MHz, the project's target clock.",
   "CLOCK_PERIOD": 16.66,
