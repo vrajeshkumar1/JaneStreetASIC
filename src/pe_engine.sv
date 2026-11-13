@@ -13,7 +13,9 @@
 `default_nettype none
 
 module pe_engine #(
-    parameter int unsigned AW = 8          // program address width (256 words)
+    parameter int unsigned AW      = 8,    // program address width (256 words)
+    parameter int unsigned FIFO_AW = 4,    // each FIFO holds 2**FIFO_AW bytes (at most 4)
+    parameter int unsigned DM_AW   = 4     // the data memory holds 2**DM_AW bytes (at most 4)
 ) (
     input  wire         clk,
     input  wire         rst_ni,
@@ -118,7 +120,7 @@ module pe_engine #(
   logic [15:0]   level_q, level_d;
   logic [7:0]    dir_q, dir_d;
   logic [31:0]   crc_q, crc_d;
-  logic [127:0]  dm_q;                // data memory, 16 bytes
+  logic [(8<<DM_AW)-1:0] dm_q;        // data memory, 2**DM_AW bytes
   logic [3:0]    delay_q, delay_d;
   logic          halted_q, halted_d, illegal_q, illegal_d;
   logic [1:0]    dbg_q, dbg_d;
@@ -130,19 +132,32 @@ module pe_engine #(
   logic [7:0] rx_push_data;
   wire  [7:0] tx_head;
 
-  pe_fifo #(.AW(4)) u_tx (
+  wire  [FIFO_AW:0] tx_level, rx_level;
+
+  pe_fifo #(.AW(FIFO_AW)) u_tx (
       .clk(clk), .rst_ni(rst_ni), .clear_i(restart_i),
       .push_i(tx_push_i), .wdata_i(tx_data_i),
       .pop_i(tx_pop), .rdata_o(tx_head),
-      .empty_o(tx_empty_o), .full_o(tx_full_o), .level_o(tx_level_o)
+      .empty_o(tx_empty_o), .full_o(tx_full_o), .level_o(tx_level)
   );
 
-  pe_fifo #(.AW(4)) u_rx (
+  pe_fifo #(.AW(FIFO_AW)) u_rx (
       .clk(clk), .rst_ni(rst_ni), .clear_i(restart_i),
       .push_i(rx_push), .wdata_i(rx_push_data),
       .pop_i(rx_pop_i), .rdata_o(rx_data_o),
-      .empty_o(rx_empty_o), .full_o(rx_full_o), .level_o(rx_level_o)
+      .empty_o(rx_empty_o), .full_o(rx_full_o), .level_o(rx_level)
   );
+
+  // The level ports are five bits wide whatever the FIFO depth.
+  logic [4:0] tx_level5, rx_level5;
+  always_comb begin
+    tx_level5 = '0;
+    rx_level5 = '0;
+    tx_level5[FIFO_AW:0] = tx_level;
+    rx_level5[FIFO_AW:0] = rx_level;
+  end
+  assign tx_level_o = tx_level5;
+  assign rx_level_o = rx_level5;
 
   // ----------------------------------------------------------------- tick
   wire tick = enable_i & ir_valid_q & (div_q == 16'd0);
@@ -257,9 +272,14 @@ module pe_engine #(
   end
 
   // --------------------------------------------------------- data memory
-  wire [3:0]  dm_addr = (ir[6] ? ra_val[3:0] : 4'd0) + ir[3:0];
-  wire [7:0]  dm_rd   = dm_q[dm_addr*8 +: 8];
-  assign dm_rdata_o   = dm_q[dm_addr_i*8 +: 8];
+  // Addresses wrap at the size of the memory, for the engine and for the host.
+  wire [3:0]       dm_sum    = (ir[6] ? ra_val[3:0] : 4'd0) + ir[3:0];
+  wire [DM_AW-1:0] dm_addr   = dm_sum[DM_AW-1:0];
+  wire [DM_AW-1:0] dm_addr_h = dm_addr_i[DM_AW-1:0];
+  wire [7:0]       dm_rd     = dm_q[dm_addr*8 +: 8];
+  assign dm_rdata_o          = dm_q[dm_addr_h*8 +: 8];
+  // The upper address bits are not used when the memory is smaller than 16 bytes.
+  wire _unused_dm = &{1'b0, dm_sum, dm_addr_i};
 
   // ------------------------------------------------------------ checksum
   logic        crc_step, crc_bit;
@@ -713,7 +733,7 @@ module pe_engine #(
 
       // Data memory, same rule.
       if (dm_we) dm_q[dm_addr*8 +: 8] <= rb_val[7:0];
-      else if (dm_we_i) dm_q[dm_addr_i*8 +: 8] <= dm_wdata_i;
+      else if (dm_we_i) dm_q[dm_addr_h*8 +: 8] <= dm_wdata_i;
     end
   end
 

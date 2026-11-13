@@ -9,6 +9,15 @@
   },
   "PL_TARGET_DENSITY_PCT": 60,
 
+  "//synth": "Synthesis recipe. The first four-engine run used DELAY 4 (not set here, so the flow's own default) and got 0.497 mm2 of cells including 9,559 buffers; AREA 0 gives 0.41 mm2 with almost none, and the tile has too little routing room for the larger netlist (three routing layers, of which only Metal3 runs left to right).",
+  "SYNTH_STRATEGY": "AREA 0",
+
+  "//routability": "Off. When on, global placement inflates cells wherever it predicts routing congestion; on this tile it predicted congestion nearly everywhere, inflated the cells by 76% and left no legal position for the last ones (the first four-engine run stopped with 'Detailed placement failed'). Spreading the cells also lengthens the wires, which is the opposite of what the shortage of Metal3 needs.",
+  "PL_ROUTABILITY_DRIVEN": false,
+
+  "//drt": "Stop detailed routing after 12 passes instead of 64. In a local trial of one engine the violation count was down to 2 by pass 8; one that is not would otherwise run into the 6-hour job limit.",
+  "DRT_OPT_ITERS": 12,
+
   "//clock": "16.66 ns = 60 MHz, the project's target clock.",
   "CLOCK_PERIOD": 16.66,
   "PL_RESIZER_HOLD_SLACK_MARGIN": 0.1,

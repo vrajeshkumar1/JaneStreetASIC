@@ -29,8 +29,10 @@ module tt_um_vrajeshkumar1_janestreetasic (
     input  wire       rst_n     // reset_n - low to reset
 );
 
-  localparam int unsigned NE = 4;   // engines. The memory blocks below and
-                                    // src/config.json assume four.
+  localparam int unsigned NE      = 4;   // engines. The memory blocks below and
+                                         // src/config.json assume four.
+  localparam int unsigned FIFO_AW = 4;   // each FIFO holds 2**FIFO_AW bytes
+  localparam int unsigned DM_AW   = 4;   // each data memory holds 2**DM_AW bytes
 
   // ---------------------------------------------------------------- reset
   logic rst_meta_q, rst_sync_q;
@@ -226,7 +228,7 @@ module tt_um_vrajeshkumar1_janestreetasic (
   genvar g;
   generate
     for (g = 0; g < NE; g = g + 1) begin : g_eng
-      pe_engine #(.AW(8)) u_engine (
+      pe_engine #(.AW(8), .FIFO_AW(FIFO_AW), .DM_AW(DM_AW)) u_engine (
           .clk              (clk),
           .rst_ni           (rst_ni),
           .enable_i         (enable[g]),
