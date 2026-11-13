@@ -110,6 +110,35 @@ failed" for one cell. The cause was upstream of that step.
 | Smaller variants, global routing only (share of reduced Metal3 capacity; remaining congestion): three engines 56%, low; four engines with 8-byte FIFOs 73%; four engines with 8-byte FIFOs and 8-byte data memory 63%, low | Local runs | The fallback if four full engines do not route. FIFO depth and data memory size are now parameters of `pe_engine` (`FIFO_AW`, `DM_AW`), set in `src/project.sv` |
 | Halving the power stripes over the memory blocks (`EXTEND_STRIPES_SRAM_ARRAY_EVERY_OTHER` off) takes the stripes from 19.4% to 12.5% of Metal4 | Local run of the power-grid steps | Not applied: Metal4 is not the scarce layer, and the present setting is the one that passed the probe run's checks. Available if top-to-bottom routing becomes the limit |
 
+## Unequal engines (13 Nov 2026)
+
+The four-engine design with the changed flow settings was hardened locally by
+the author: detailed routing stalled at about 43,000 violations by its 11th
+pass, and the GitHub run of the same design exceeded the 6-hour job limit.
+Four full-size engines do not fit the tile's routing. The author chose to keep
+four engines and make them different sizes.
+
+| Decision | Reason | Alternative |
+|---|---|---|
+| Engines 0 and 1: 8-byte FIFOs, 4-byte data memory | UART, SPI and I2C do not need more; two 16-byte FIFOs alone are a quarter of a full engine's cells | Three full engines, which loses the four-protocols-at-once demonstration |
+| Engine 3 keeps 16-byte FIFOs and 16 bytes of data memory | A low-speed USB data packet is up to 9 bytes after the checksum unit supplies the last two, which does not fit an 8-byte FIFO | The same size as engines 0 and 1, to be tried only if this design routes and an application needs it |
+| Engine 2 has a 512-word memory block (IHP 512 x 32, 416.64 x 191.34 um) | 2,048 bytes hold a program and a full 1,526-byte Ethernet frame. The host link is slower than 10 Mbit/s, so a frame has to be in the chip before it is sent. The block has the same width and power columns as the 256-word one | A separate 1,024-byte buffer block shared between engines |
+| `ldm` / `stm`: one byte of the engine's own memory block, two ticks | Gives every engine a large byte memory with no new storage: the largest example program uses 55 of 256 words. The block has one port, so the access takes the tick in which the next instruction would have been fetched, and the fetch follows on the second tick | Replacing the flip-flop data memory altogether (the author wants one-tick `ld` / `st` kept) |
+| `ldm` / `stm` are a mode bit of `ld` / `st` | All 16 opcodes are in use; bit 18 of both was free | |
+| Program memory at 0x4000 + 0x800 x e in the host map; `SIZES` and `DM_SIZE` registers | Room for 512 words per engine; the host can read what each engine has instead of assuming | |
+
+Measured for this design with the real flow run locally up to the clock tree
+stage: 0.344 mm2 of cells after synthesis (four full engines: 0.409), Metal3
+at 68% of the flow's reduced capacity in a quick global route (four full
+engines: 78%), setup slack +6.4 ns in the typical corner. Detailed routing was
+left to the author's machine.
+
+Chosen by the AI tool without asking: the two-tick timing (the author had
+allowed three), the register-only address of `ldm` / `stm` (an offset would
+put an adder in front of the memory address, the slowest path in the design),
+the `SIZES` / `DM_SIZE` registers, the `.org` directive, and the block's
+position (same corner as before, y = 514.08).
+
 ## Open questions the probe build answered
 
 All four were answered by the layout run of 12 November 2026: the flow accepts

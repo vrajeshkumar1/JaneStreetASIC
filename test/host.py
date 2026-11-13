@@ -26,7 +26,7 @@ DRIVE_OUT, DRIVE_IO, OPEN_DRAIN = 0x14, 0x15, 0x16
 E_CFG, E_PULL_THRESH, E_PUSH_THRESH, E_CLKDIV = 0x00, 0x01, 0x02, 0x03
 E_SIDE0, E_SIDE1, E_PC, E_STATUS = 0x05, 0x06, 0x07, 0x09
 E_TX_LEVEL, E_RX_LEVEL, E_FIFO, E_DEBUG = 0x0A, 0x0B, 0x0C, 0x0D
-E_CRC_POLY, E_CRC_WIDTH, E_CRC, E_R0 = 0x0E, 0x12, 0x14, 0x20
+E_CRC_POLY, E_CRC_WIDTH, E_SIZES, E_CRC, E_DM_SIZE, E_R0 = 0x0E, 0x12, 0x13, 0x14, 0x18, 0x20
 
 # ---- engine STATUS bits
 ST_RUNNING, ST_STALLED, ST_HALTED, ST_ILLEGAL = 0x01, 0x02, 0x04, 0x08
@@ -42,7 +42,7 @@ def dmem(e, offset=0):
 
 
 def prog(e, word=0):
-    return 0x1000 + 0x400 * e + 4 * word
+    return 0x4000 + 0x800 * e + 4 * word
 
 
 def pin(name):
@@ -154,7 +154,7 @@ class Host:
         for word in program.words:
             data += [(word >> s) & 0xFF for s in (0, 8, 16, 24)]
         await self.write(prog(e), data)
-        await self.write(ereg(e, E_PC), program.labels[entry] if entry else 0)
+        await self.set_pc(e, program.labels[entry] if entry else 0)
         return program
 
     async def load_file(self, e, name, entry=None):
@@ -188,6 +188,19 @@ class Host:
         """Switch pin drivers on (and all others off). Done after the engines
         have started, so that each program has set its pin levels first."""
         await self.write(DRIVE_OUT, [sum(1 << n for n in out), sum(1 << n for n in io)])
+
+    async def set_pc(self, e, address):
+        await self.write(ereg(e, E_PC), [address & 0xFF, address >> 8])
+
+    async def pc(self, e):
+        lo, hi = await self.read(ereg(e, E_PC), 2)
+        return lo | (hi << 8)
+
+    async def sizes(self, e):
+        """-> (program words, FIFO bytes, data memory bytes) of engine e."""
+        s = await self.read1(ereg(e, E_SIZES))
+        d = await self.read1(ereg(e, E_DM_SIZE))
+        return 1 << (s & 15), 1 << (s >> 4), 1 << (d & 15)
 
     async def enable(self, mask):
         await self.write(ENABLE, mask)

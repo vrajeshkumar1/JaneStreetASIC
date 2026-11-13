@@ -14,8 +14,9 @@ PROJECT_SOURCES = project.sv pe_pins.sv pe_spi.sv pe_regs.sv pe_engine.sv pe_fif
 # netlist keeps the memory block as a black box, so that build needs the
 # models as well.
 SRAM_MODEL_DIR ?= $(PWD)/ihp_sram
-SRAM_MODELS = $(SRAM_MODEL_DIR)/RM_IHPSG13_1P_core_behavioral_bm_bist.v \
-              $(SRAM_MODEL_DIR)/RM_IHPSG13_1P_256x32_c2_bm_bist.v
+   SRAM_MODELS = $(SRAM_MODEL_DIR)/RM_IHPSG13_1P_core_behavioral_bm_bist.v \
+                 $(SRAM_MODEL_DIR)/RM_IHPSG13_1P_256x32_c2_bm_bist.v \
+                 $(SRAM_MODEL_DIR)/RM_IHPSG13_1P_512x32_c2_bm_bist.v
 
 ifneq ($(GATES),yes)
 

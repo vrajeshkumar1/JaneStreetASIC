@@ -466,3 +466,40 @@ async def test_halt_and_illegal(dut):
     dut.restart.value = 0
     await ClockCycles(dut.clk, 2)
     assert dut.halted.value == 0 and dut.illegal.value == 0 and int(dut.pc.value) == 0
+
+
+@cocotb.test()
+async def test_memory_block_timing(dut):
+    """ldm and stm take two ticks where other instructions take one, and the
+    delay field is added after that. Measured as the width of a pulse on out1
+    around the instruction, at one clock per tick."""
+    b = Bench(dut)
+
+    async def width(middle):
+        await b.reset()
+        await b.load(f"""
+            set r1, 400
+            set r2, 0x5A
+            set pin out1, 1
+            {middle}
+            set pin out1, 0
+            halt
+        """)
+        await b.start()
+        high = 0
+        for _ in range(200):
+            await RisingEdge(dut.clk)
+            high += (int(dut.uo_out.value) >> 1) & 1
+            if int(dut.halted.value) and high:
+                break
+        for _ in range(4):                      # the output flip-flop is one clock behind
+            await RisingEdge(dut.clk)
+            high += (int(dut.uo_out.value) >> 1) & 1
+        return high
+
+    base = await width("nop")
+    assert await width("stm r2, [r1]") == base + 1
+    assert await width("ldm r3, [r1]") == base + 1
+    assert await b.reg(3) == 0x5A               # the store two runs ago is still there
+    assert await width("ldm r3, [r1]  [2]") == base + 3
+    assert await width("nop  [2]") == base + 2

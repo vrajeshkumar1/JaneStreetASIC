@@ -119,17 +119,19 @@ module tb_engine ();
   wire        mem_ren;
   wire [7:0]  mem_addr;
   wire [31:0] mem_dout;
+  wire        mem_wen;
+  wire [31:0] mem_din, mem_bm;
 
   RM_IHPSG13_1P_256x32_c2_bm_bist u_mem (
       .A_CLK      (clk),
-      .A_MEN      (h_prog_we | mem_ren),
-      .A_WEN      (h_prog_we),
+      .A_MEN      (h_prog_we | mem_ren | mem_wen),
+      .A_WEN      (h_prog_we | mem_wen),
       .A_REN      (mem_ren & ~h_prog_we),
       .A_ADDR     (h_prog_we ? h_prog_addr : mem_addr),
-      .A_DIN      (h_prog_wdata),
+      .A_DIN      (h_prog_we ? h_prog_wdata : mem_din),
       .A_DLY      (1'b1),
       .A_DOUT     (mem_dout),
-      .A_BM       (32'hFFFF_FFFF),
+      .A_BM       (h_prog_we ? 32'hFFFF_FFFF : mem_bm),
       .A_BIST_CLK (1'b0),
       .A_BIST_EN  (1'b0),
       .A_BIST_MEN (1'b0),
@@ -165,6 +167,9 @@ module tb_engine ();
       .flag_clr_o       (flag_clr),
       .mem_ren_o        (mem_ren),
       .mem_addr_o       (mem_addr),
+      .mem_wen_o        (mem_wen),
+      .mem_din_o        (mem_din),
+      .mem_bm_o         (mem_bm),
       .mem_dout_i       (mem_dout),
       .tx_push_i        (h_tx_push),
       .tx_data_i        (h_tx_data),

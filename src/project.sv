@@ -7,7 +7,9 @@
 //   pe_spi    host link (SPI target) -> byte bus
 //   pe_regs   host registers and address decoder
 //   pe_engine one protocol engine, NE of them
-//   u_mem0..3 one IHP 256 x 32 memory block per engine, holding its program
+//   u_mem0..3 one IHP memory block per engine, holding its program (and any
+//             data the program keeps there): 256 x 32, and 512 x 32 for
+//             engine 2
 //
 // Everything runs on the one clock. Reset is asserted asynchronously and
 // released synchronously.
@@ -29,10 +31,20 @@ module tt_um_vrajeshkumar1_janestreetasic (
     input  wire       rst_n     // reset_n - low to reset
 );
 
-  localparam int unsigned NE      = 4;   // engines. The memory blocks below and
-                                         // src/config.json assume four.
-  localparam int unsigned FIFO_AW = 4;   // each FIFO holds 2**FIFO_AW bytes
-  localparam int unsigned DM_AW   = 4;   // each data memory holds 2**DM_AW bytes
+  localparam int unsigned NE = 4;   // engines. The memory blocks below and
+                                    // src/config.json assume four.
+
+  // The engines are not all the same size (docs/spec.md, section 1.1):
+  //   engines 0, 1  256-word program, 8-byte FIFOs, 4-byte data memory
+  //   engine 2      512-word program, 8-byte FIFOs, 4-byte data memory
+  //   engine 3      256-word program, 16-byte FIFOs, 16-byte data memory
+  // These are the base-2 logarithms; the generate loop below picks per engine.
+  localparam int unsigned AW_BIG   = 9;   // engine 2
+  localparam int unsigned AW_STD   = 8;
+  localparam int unsigned FIFO_BIG = 4;   // engine 3
+  localparam int unsigned FIFO_STD = 3;
+  localparam int unsigned DM_BIG   = 4;   // engine 3
+  localparam int unsigned DM_STD   = 2;
 
   // ---------------------------------------------------------------- reset
   logic rst_meta_q, rst_sync_q;
@@ -116,9 +128,10 @@ module tt_um_vrajeshkumar1_janestreetasic (
   wire [NE-1:0]    stalled, halted, illegal;
   wire [NE*2-1:0]  debug, dbg_clr;
   wire [NE*32-1:0] crc;
-  wire [NE*8-1:0]  pc;
+  wire [NE*9-1:0]  pc;
   wire [NE-1:0]    pc_we;
-  wire [7:0]       pc_wdata;
+  wire [8:0]       pc_wdata;
+  wire [NE*12-1:0] eng_size;
 
   wire [NE-1:0]    tx_push, tx_full, tx_empty, rx_pop, rx_empty, rx_full;
   wire [7:0]       tx_data;
@@ -136,7 +149,7 @@ module tt_um_vrajeshkumar1_janestreetasic (
   wire [NE*16-1:0] hreg_rdata;
 
   wire [NE-1:0]    prog_we, prog_re;
-  wire [7:0]       prog_addr;
+  wire [8:0]       prog_addr;
   wire [31:0]      prog_wdata;
   wire [NE*32-1:0] mem_dout;
 
@@ -196,6 +209,7 @@ module tt_um_vrajeshkumar1_janestreetasic (
       .pc_i             (pc),
       .pc_we_o          (pc_we),
       .pc_wdata_o       (pc_wdata),
+      .size_i           (eng_size),
       .tx_push_o        (tx_push),
       .tx_data_o        (tx_data),
       .tx_full_i        (tx_full),
@@ -222,13 +236,34 @@ module tt_um_vrajeshkumar1_janestreetasic (
   );
 
   // -------------------------------------------------------------- engines
-  wire [NE-1:0]   eng_ren;
-  wire [NE*8-1:0] eng_addr;
+  // Memory-block signals are nine address bits wide for every engine; an
+  // engine with a 256-word block leaves the top bit at zero.
+  wire [NE-1:0]    eng_ren, eng_wen;
+  wire [NE*9-1:0]  eng_addr;
+  wire [NE*32-1:0] eng_din, eng_bm;
 
   genvar g;
   generate
     for (g = 0; g < NE; g = g + 1) begin : g_eng
-      pe_engine #(.AW(8), .FIFO_AW(FIFO_AW), .DM_AW(DM_AW)) u_engine (
+      localparam int unsigned AW_G   = (g == 2) ? AW_BIG   : AW_STD;
+      localparam int unsigned FIFO_G = (g == 3) ? FIFO_BIG : FIFO_STD;
+      localparam int unsigned DM_G   = (g == 3) ? DM_BIG   : DM_STD;
+
+      wire [AW_G-1:0] e_addr, e_pc;
+
+      // Zero-extend to nine bits.
+      logic [8:0] addr9, pc9;
+      always_comb begin
+        addr9 = '0;
+        pc9   = '0;
+        addr9[AW_G-1:0] = e_addr;
+        pc9[AW_G-1:0]   = e_pc;
+      end
+      assign eng_addr[g*9 +: 9]   = addr9;
+      assign pc[g*9 +: 9]         = pc9;
+      assign eng_size[g*12 +: 12] = {DM_G[3:0], FIFO_G[3:0], AW_G[3:0]};
+
+      pe_engine #(.AW(AW_G), .FIFO_AW(FIFO_G), .DM_AW(DM_G)) u_engine (
           .clk              (clk),
           .rst_ni           (rst_ni),
           .enable_i         (enable[g]),
@@ -252,7 +287,10 @@ module tt_um_vrajeshkumar1_janestreetasic (
           .flag_set_o       (eng_flag_set[g*8 +: 8]),
           .flag_clr_o       (eng_flag_clr[g*8 +: 8]),
           .mem_ren_o        (eng_ren[g]),
-          .mem_addr_o       (eng_addr[g*8 +: 8]),
+          .mem_addr_o       (e_addr),
+          .mem_wen_o        (eng_wen[g]),
+          .mem_din_o        (eng_din[g*32 +: 32]),
+          .mem_bm_o         (eng_bm[g*32 +: 32]),
           .mem_dout_i       (mem_dout[g*32 +: 32]),
           .tx_push_i        (tx_push[g]),
           .tx_data_i        (tx_data),
@@ -273,8 +311,8 @@ module tt_um_vrajeshkumar1_janestreetasic (
           .hreg_wdata_i     (hreg_wdata),
           .hreg_rdata_o     (hreg_rdata[g*16 +: 16]),
           .pc_we_i          (pc_we[g]),
-          .pc_wdata_i       (pc_wdata),
-          .pc_o             (pc[g*8 +: 8]),
+          .pc_wdata_i       (pc_wdata[AW_G-1:0]),
+          .pc_o             (e_pc),
           .stalled_o        (stalled[g]),
           .halted_o         (halted[g]),
           .illegal_o        (illegal[g]),
@@ -286,36 +324,41 @@ module tt_um_vrajeshkumar1_janestreetasic (
   endgenerate
 
   // ------------------------------------------------------ program memory
-  // While an engine is enabled its memory block follows the engine. While it
-  // is stopped the block follows the host, which can then write and read it.
-  // The engine only reads when enabled and pe_regs only asks when it is not,
-  // so the two never ask on the same clock.
-  wire [NE-1:0]   mem_men  = eng_ren | prog_we | prog_re;
-  wire [NE-1:0]   mem_ren  = eng_ren | prog_re;
-  wire [NE*8-1:0] mem_addr;
+  // While an engine is enabled its memory block follows the engine, which
+  // fetches instructions and can load and store data bytes (ldm / stm). While
+  // it is stopped the block follows the host, which can then write and read
+  // it. The engine only asks when enabled and pe_regs only when it is not, so
+  // the two never ask on the same clock.
+  wire [NE-1:0]    mem_wen  = eng_wen | prog_we;
+  wire [NE-1:0]    mem_ren  = eng_ren | prog_re;
+  wire [NE-1:0]    mem_men  = mem_wen | mem_ren;
+  wire [NE*9-1:0]  mem_addr;
+  wire [NE*32-1:0] mem_din, mem_bm;
 
   generate
-    for (g = 0; g < NE; g = g + 1) begin : g_maddr
-      assign mem_addr[g*8 +: 8] = enable[g] ? eng_addr[g*8 +: 8] : prog_addr;
+    for (g = 0; g < NE; g = g + 1) begin : g_mmux
+      assign mem_addr[g*9 +: 9]  = enable[g] ? eng_addr[g*9 +: 9] : prog_addr;
+      assign mem_din[g*32 +: 32] = enable[g] ? eng_din[g*32 +: 32] : prog_wdata;
+      assign mem_bm[g*32 +: 32]  = enable[g] ? eng_bm[g*32 +: 32]  : 32'hFFFF_FFFF;
     end
   endgenerate
 
   RM_IHPSG13_1P_256x32_c2_bm_bist u_mem0 (
       .A_CLK      (clk),
       .A_MEN      (mem_men[0]),
-      .A_WEN      (prog_we[0]),
+      .A_WEN      (mem_wen[0]),
       .A_REN      (mem_ren[0]),
-      .A_ADDR     (mem_addr[0*8 +: 8]),
-      .A_DIN      (prog_wdata),
+      .A_ADDR     (mem_addr[0*9 +: 8]),
+      .A_DIN      (mem_din[0*32 +: 32]),
       .A_DLY      (1'b1),
       .A_DOUT     (mem_dout[0*32 +: 32]),
-      .A_BM       (32'hFFFF_FFFF),
+      .A_BM       (mem_bm[0*32 +: 32]),
       .A_BIST_CLK (1'b0),
       .A_BIST_EN  (1'b0),
       .A_BIST_MEN (1'b0),
       .A_BIST_WEN (1'b0),
       .A_BIST_REN (1'b0),
-      .A_BIST_ADDR(8'h00),
+      .A_BIST_ADDR(8'h0),
       .A_BIST_DIN (32'h0000_0000),
       .A_BIST_BM  (32'h0000_0000)
   );
@@ -323,39 +366,39 @@ module tt_um_vrajeshkumar1_janestreetasic (
   RM_IHPSG13_1P_256x32_c2_bm_bist u_mem1 (
       .A_CLK      (clk),
       .A_MEN      (mem_men[1]),
-      .A_WEN      (prog_we[1]),
+      .A_WEN      (mem_wen[1]),
       .A_REN      (mem_ren[1]),
-      .A_ADDR     (mem_addr[1*8 +: 8]),
-      .A_DIN      (prog_wdata),
+      .A_ADDR     (mem_addr[1*9 +: 8]),
+      .A_DIN      (mem_din[1*32 +: 32]),
       .A_DLY      (1'b1),
       .A_DOUT     (mem_dout[1*32 +: 32]),
-      .A_BM       (32'hFFFF_FFFF),
+      .A_BM       (mem_bm[1*32 +: 32]),
       .A_BIST_CLK (1'b0),
       .A_BIST_EN  (1'b0),
       .A_BIST_MEN (1'b0),
       .A_BIST_WEN (1'b0),
       .A_BIST_REN (1'b0),
-      .A_BIST_ADDR(8'h00),
+      .A_BIST_ADDR(8'h0),
       .A_BIST_DIN (32'h0000_0000),
       .A_BIST_BM  (32'h0000_0000)
   );
 
-  RM_IHPSG13_1P_256x32_c2_bm_bist u_mem2 (
+  RM_IHPSG13_1P_512x32_c2_bm_bist u_mem2 (
       .A_CLK      (clk),
       .A_MEN      (mem_men[2]),
-      .A_WEN      (prog_we[2]),
+      .A_WEN      (mem_wen[2]),
       .A_REN      (mem_ren[2]),
-      .A_ADDR     (mem_addr[2*8 +: 8]),
-      .A_DIN      (prog_wdata),
+      .A_ADDR     (mem_addr[2*9 +: 9]),
+      .A_DIN      (mem_din[2*32 +: 32]),
       .A_DLY      (1'b1),
       .A_DOUT     (mem_dout[2*32 +: 32]),
-      .A_BM       (32'hFFFF_FFFF),
+      .A_BM       (mem_bm[2*32 +: 32]),
       .A_BIST_CLK (1'b0),
       .A_BIST_EN  (1'b0),
       .A_BIST_MEN (1'b0),
       .A_BIST_WEN (1'b0),
       .A_BIST_REN (1'b0),
-      .A_BIST_ADDR(8'h00),
+      .A_BIST_ADDR(9'h0),
       .A_BIST_DIN (32'h0000_0000),
       .A_BIST_BM  (32'h0000_0000)
   );
@@ -363,25 +406,26 @@ module tt_um_vrajeshkumar1_janestreetasic (
   RM_IHPSG13_1P_256x32_c2_bm_bist u_mem3 (
       .A_CLK      (clk),
       .A_MEN      (mem_men[3]),
-      .A_WEN      (prog_we[3]),
+      .A_WEN      (mem_wen[3]),
       .A_REN      (mem_ren[3]),
-      .A_ADDR     (mem_addr[3*8 +: 8]),
-      .A_DIN      (prog_wdata),
+      .A_ADDR     (mem_addr[3*9 +: 8]),
+      .A_DIN      (mem_din[3*32 +: 32]),
       .A_DLY      (1'b1),
       .A_DOUT     (mem_dout[3*32 +: 32]),
-      .A_BM       (32'hFFFF_FFFF),
+      .A_BM       (mem_bm[3*32 +: 32]),
       .A_BIST_CLK (1'b0),
       .A_BIST_EN  (1'b0),
       .A_BIST_MEN (1'b0),
       .A_BIST_WEN (1'b0),
       .A_BIST_REN (1'b0),
-      .A_BIST_ADDR(8'h00),
+      .A_BIST_ADDR(8'h0),
       .A_BIST_DIN (32'h0000_0000),
       .A_BIST_BM  (32'h0000_0000)
   );
 
   // "ena" is not used: the design has nothing to do when it is not selected.
-  wire _unused = &{ena, 1'b0};
+  // and the top address bit of the three 256-word blocks.
+  wire _unused = &{ena, mem_addr[0*9 + 8], mem_addr[1*9 + 8], mem_addr[3*9 + 8], 1'b0};
 
 endmodule
 

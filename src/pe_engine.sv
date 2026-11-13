@@ -51,6 +51,9 @@ module pe_engine #(
     // ---- program memory
     output wire          mem_ren_o,
     output wire [AW-1:0] mem_addr_o,
+    output wire          mem_wen_o,          // "stm": store one byte
+    output wire [31:0]   mem_din_o,
+    output wire [31:0]   mem_bm_o,           // which bits of the word to store
     input  wire [31:0]   mem_dout_i,
 
     // ---- host side of the FIFOs
@@ -125,6 +128,14 @@ module pe_engine #(
   logic          halted_q, halted_d, illegal_q, illegal_d;
   logic [1:0]    dbg_q, dbg_d;
   logic          ir_valid_q;
+  // "ldm" / "stm" (a byte in the memory block) take two ticks. On the second,
+  // mem_dout_i carries the data word and not an instruction; these remember
+  // what the instruction asked for.
+  logic          mphase_q;            // second tick of ldm / stm
+  logic          m_load_q;            // it is ldm
+  logic [2:0]    m_rd_q;              // ldm: destination register
+  logic [1:0]    m_byte_q;            // ldm: which byte of the word
+  logic [3:0]    m_dly_q;             // the instruction's delay field
   logic [15:0]   div_q;
 
   // ---------------------------------------------------------------- FIFOs
@@ -177,7 +188,8 @@ module pe_engine #(
   wire        ss_en  = ir[21];
   wire [1:0]  ss_val = ir[20:19];
 
-  wire active = tick & ~halted_q & (delay_q == 4'd0);
+  wire active = tick & ~halted_q & (delay_q == 4'd0) & ~mphase_q;
+  wire mfin   = tick & ~halted_q & mphase_q;      // second tick of ldm / stm
   wire skip   = (cond == 2'b01 && !t_q) || (cond == 2'b10 && t_q);
 
   // Register read ports. Every instruction that reads a register keeps its
@@ -291,7 +303,7 @@ module pe_engine #(
                                         : ({1'b0, crc_q[31:1]} ^ crc_poly);
 
   // ------------------------------------------------------------ execute
-  logic            stall, taken, bad, do_halt;
+  logic            stall, taken, bad, do_halt, mstart;
   logic [AW-1:0]   target;
   logic            rw_en;
   logic [2:0]      rw_idx;
@@ -302,6 +314,17 @@ module pe_engine #(
   logic [1:0]      wpins;
 
   wire [AW-1:0] pc_inc = pc_q + 1'b1;
+
+  // ldm: the byte picked out of the word the memory block returned.
+  logic [7:0] m_rdata;
+  always_comb begin
+    case (m_byte_q)
+      2'd0:    m_rdata = mem_dout_i[7:0];
+      2'd1:    m_rdata = mem_dout_i[15:8];
+      2'd2:    m_rdata = mem_dout_i[23:16];
+      default: m_rdata = mem_dout_i[31:24];
+    endcase
+  end
 
   always_comb begin
     // Defaults: everything holds.
@@ -325,6 +348,7 @@ module pe_engine #(
     taken        = 1'b0;
     bad          = 1'b0;
     do_halt      = 1'b0;
+    mstart       = 1'b0;
     target       = ir[AW-1:0];
     rw_en        = 1'b0;
     rw_idx       = 3'd0;
@@ -344,6 +368,12 @@ module pe_engine #(
     first        = ~stall_q;
     wt           = stall_q ? wtime_q : 16'd0;
     wpins        = {pins_i[ir[7:4]], pins_i[pin_a]};
+
+    if (mfin && m_load_q) begin
+      rw_en   = 1'b1;
+      rw_idx  = m_rd_q;
+      rw_data = {8'd0, m_rdata};
+    end
 
     if (active && cond == 2'b11) begin
       bad = 1'b1;
@@ -567,12 +597,21 @@ module pe_engine #(
         end
 
         // --------------------------------------------------- ld / st
+        // Bit 18 = 0: the flip-flop data memory, one tick. Bit 18 = 1
+        // ("ldm" / "stm"): one byte of the memory block, at the byte address
+        // in the base register; two ticks.
         OP_LD: begin
-          rw_en   = 1'b1;
-          rw_idx  = ir[15:13];
-          rw_data = {8'd0, dm_rd};
+          if (ir[18]) mstart = 1'b1;
+          else begin
+            rw_en   = 1'b1;
+            rw_idx  = ir[15:13];
+            rw_data = {8'd0, dm_rd};
+          end
         end
-        OP_ST: dm_we = 1'b1;
+        OP_ST: begin
+          if (ir[18]) mstart = 1'b1;
+          else dm_we = 1'b1;
+        end
 
         // ------------------------------------------------ call / ret
         OP_CALL: begin
@@ -615,15 +654,36 @@ module pe_engine #(
 
   // An illegal word or a halt stops the engine without advancing.
   wire stop_now = active & (bad | do_halt);
-  wire advance  = active & ~stall & ~bad & ~do_halt;
+  wire advance  = active & ~stall & ~bad & ~do_halt & ~mstart;
 
   wire [AW-1:0] next_pc = taken ? target : pc_inc;
 
   // First fetch after the engine is enabled (or its pc was changed).
   wire fetch_first = enable_i & ~ir_valid_q & ~halted_q;
 
-  assign mem_ren_o  = fetch_first | advance;
-  assign mem_addr_o = fetch_first ? pc_q : next_pc;
+  // The memory block has one port. Normally it fetches the next instruction.
+  // On the first tick of ldm / stm it reads or writes the data byte instead
+  // (word address = byte address / 4), and on the second tick it fetches the
+  // instruction after.
+  wire          m_store = mstart & (op == OP_ST);
+  wire [AW-1:0] m_addr  = ra_val[AW+1:2];
+  logic [31:0]  m_bm;
+  always_comb begin
+    case (ra_val[1:0])
+      2'd0:    m_bm = 32'h0000_00FF;
+      2'd1:    m_bm = 32'h0000_FF00;
+      2'd2:    m_bm = 32'h00FF_0000;
+      default: m_bm = 32'hFF00_0000;
+    endcase
+  end
+
+  assign mem_ren_o  = fetch_first | advance | mfin | (mstart & ~m_store);
+  assign mem_wen_o  = m_store;
+  assign mem_din_o  = {4{rb_val[7:0]}};
+  assign mem_bm_o   = m_bm;
+  assign mem_addr_o = fetch_first ? pc_q :
+                      mfin        ? pc_inc :
+                      mstart      ? m_addr : next_pc;
 
   always_comb begin
     pc_d      = pc_q;
@@ -631,7 +691,11 @@ module pe_engine #(
     stall_d   = stall_q;
     halted_d  = halted_q;
     illegal_d = illegal_q;
-    if (advance) begin
+    if (mfin) begin
+      pc_d    = pc_inc;
+      delay_d = m_dly_q;
+      stall_d = 1'b0;
+    end else if (advance) begin
       pc_d    = next_pc;
       delay_d = dly;
       stall_d = 1'b0;
@@ -672,7 +736,24 @@ module pe_engine #(
       illegal_q  <= 1'b0;
       dbg_q      <= '0;
       ir_valid_q <= 1'b0;
+      mphase_q   <= 1'b0;
+      m_load_q   <= 1'b0;
+      m_rd_q     <= '0;
+      m_byte_q   <= '0;
+      m_dly_q    <= '0;
     end else begin
+      // ldm / stm. Stopping the engine between the two ticks abandons the
+      // access; the instruction runs again when the engine restarts.
+      if (restart_i || pc_we_i || !enable_i) mphase_q <= 1'b0;
+      else if (mstart)                       mphase_q <= 1'b1;
+      else if (mfin)                         mphase_q <= 1'b0;
+      if (mstart) begin
+        m_load_q <= (op == OP_LD);
+        m_rd_q   <= ir[15:13];
+        m_byte_q <= ra_val[1:0];
+        m_dly_q  <= dly;
+      end
+
       // Program counter and the "instruction on mem_dout_i is valid" flag.
       if (restart_i) begin
         pc_q       <= '0;

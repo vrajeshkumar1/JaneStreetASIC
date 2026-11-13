@@ -10,7 +10,8 @@
 //   0x0000..0x003F      global registers
 //   0x0100 + 0x40 * e   registers of engine e
 //   0x0200 + 0x10 * e   data memory of engine e
-//   0x1000 + 0x400 * e  program memory of engine e, 4 bytes per word
+//   0x4000 + 0x800 * e  program memory of engine e, 4 bytes per word, up to
+//                       512 words
 //
 // The map has room for four engines; NE may be 1 to 4. Per-engine buses are
 // flat vectors: engine e uses bits [e*W +: W] of a bus whose entries are W
@@ -77,9 +78,13 @@ module pe_regs #(
     input  wire [NE*32-1:0] crc_i,
 
     // ---- program counter
-    input  wire [NE*8-1:0]  pc_i,
+    input  wire [NE*9-1:0]  pc_i,           // nine bits per engine, zero-padded
     output wire [NE-1:0]    pc_we_o,
-    output wire [7:0]       pc_wdata_o,
+    output wire [8:0]       pc_wdata_o,
+
+    // ---- sizes of each engine, constants: [3:0] log2 of program words,
+    //      [7:4] log2 of FIFO bytes, [11:8] log2 of data memory bytes
+    input  wire [NE*12-1:0] size_i,
 
     // ---- FIFOs
     output wire [NE-1:0]    tx_push_o,
@@ -108,7 +113,7 @@ module pe_regs #(
     // ---- program memory
     output wire [NE-1:0]    prog_we_o,
     output wire [NE-1:0]    prog_re_o,
-    output wire [7:0]       prog_addr_o,
+    output wire [8:0]       prog_addr_o,
     output wire [31:0]      prog_wdata_o,
     input  wire [NE*32-1:0] prog_rdata_i
 );
@@ -120,7 +125,7 @@ module pe_regs #(
   wire sel_glob = (addr_i[14:6]  == 9'h000);   // 0x0000..0x003F
   wire sel_ereg = (addr_i[14:8]  == 7'h01);    // 0x0100..0x01FF
   wire sel_dmem = (addr_i[14:6]  == 9'h008);   // 0x0200..0x023F
-  wire sel_prog = (addr_i[14:12] == 3'b001);   // 0x1000..0x1FFF
+  wire sel_prog = (addr_i[14:13] == 2'b10);    // 0x4000..0x5FFF
 
   wire [5:0] off = addr_i[5:0];                // offset inside a block
 
@@ -129,7 +134,7 @@ module pe_regs #(
   always_comb begin
     if (sel_ereg)      e = addr_i[7:6];
     else if (sel_dmem) e = addr_i[5:4];
-    else               e = addr_i[11:10];
+    else               e = addr_i[12:11];
   end
 
   // One-hot engine select; all zero when the address names an engine that
@@ -301,7 +306,7 @@ module pe_regs #(
       assign cfg_crc_width_o[g*6 +: 6]   = width_q;
 
       // Writes with a side effect in the engine.
-      assign pc_we_o[g]          = we & (off == 6'h07) & ~enable_q[g];
+      assign pc_we_o[g]          = we & (off == 6'h07 || off == 6'h08) & ~enable_q[g];
       assign tx_push_o[g]        = we & (off == 6'h0C);
       assign rx_pop_o[g]         = pop;
       assign dbg_clr_o[g*2 +: 2] = (we && off == 6'h0D) ? wdata_i[3:2] : 2'b00;
@@ -320,7 +325,8 @@ module pe_regs #(
           6'h04:   rd = clkdiv_q[15:8];
           6'h05:   rd = {2'b00, side0_q};
           6'h06:   rd = {2'b00, side1_q};
-          6'h07:   rd = pc_i[g*8 +: 8];
+          6'h07:   rd = pc_i[g*9 +: 8];
+          6'h08:   rd = {7'd0, pc_i[g*9 + 8]};
           6'h09:   rd = {rx_full_i[g], rx_empty_i[g], tx_full_i[g], tx_empty_i[g],
                          illegal_i[g], halted_i[g], stalled_i[g],
                          enable_q[g] & ~halted_i[g]};
@@ -333,6 +339,8 @@ module pe_regs #(
           6'h10:   rd = poly_q[23:16];
           6'h11:   rd = poly_q[31:24];
           6'h12:   rd = {2'b00, width_q};
+          6'h13:   rd = size_i[g*12 +: 8];
+          6'h18:   rd = {4'd0, size_i[g*12 + 8 +: 4]};
           6'h14:   rd = crc_val[7:0];
           6'h15:   rd = crc_val[15:8];
           6'h16:   rd = crc_val[23:16];
@@ -348,7 +356,17 @@ module pe_regs #(
     end
   endgenerate
 
-  assign pc_wdata_o = wdata_i;
+  // The host writes the program counter one byte at a time and keeps the
+  // other part.
+  logic [8:0] pc_sel;
+  integer     m;
+  always_comb begin
+    pc_sel = '0;
+    for (m = 0; m < NE; m = m + 1) begin
+      if (e_hot[m]) pc_sel = pc_i[m*9 +: 9];
+    end
+  end
+  assign pc_wdata_o = (off == 6'h07) ? {pc_sel[8], wdata_i} : {wdata_i[0], pc_sel[7:0]};
   assign tx_data_o  = wdata_i;
 
   // ------------------------------------------- per-engine values at "e"
@@ -406,7 +424,7 @@ module pe_regs #(
     end
   end
 
-  assign prog_addr_o  = addr_i[9:2];
+  assign prog_addr_o  = addr_i[10:2];
   assign prog_wdata_o = {wdata_i, wbuf_q};
   assign prog_we_o    = {NE{we_prog & (addr_i[1:0] == 2'd3)}} & e_hot & ~enable_q;
   assign prog_re_o    = {NE{reading_i & sel_prog}} & e_hot & ~enable_q;

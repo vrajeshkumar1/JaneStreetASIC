@@ -65,7 +65,7 @@
   "RUN_KLAYOUT_DRC": 1,
   "KLAYOUT_DRC_RUNSET": "pdk_dir::libs.tech/klayout/tech/drc/ihp-sg13cmos5l.drc",
 
-  "//macros": "Four IHP single-port 256 x 32 memory blocks (416.64 x 118.78 um each), one per engine: two on the bottom edge (orientation FS, pin edge on top) and two on the top edge (orientation N, pin edge at the bottom), so every pin edge faces the logic. The top-left block starts at x = 273.12 to leave the tile's own pins (top edge, x = 30 to 191) clear. Every x is 3.36 + 134.88 * k: 134.88 um is 3 power-stripe pitches (44.96) and 281 routing tracks (0.48), so each block sits on the stripes and on the routing grid exactly as the block at x = 3.36 did in the probe build. Every y is a multiple of the 3.78 um row height. Corner names are LibreLane's; the block's fast corner was characterized at -55 C.",
+  "//macros": "Four IHP single-port memory blocks, one per engine: three of 256 x 32 (416.64 x 118.78 um) and, for engine 2, one of 512 x 32 (416.64 x 191.34 um; same width and the same power columns). Two sit on the bottom edge (orientation FS, pin edge on top) and two on the top edge (orientation N, pin edge at the bottom), so every pin edge faces the logic. The top-left block starts at x = 273.12 to leave the tile's own pins (top edge, x = 30 to 191) clear. Every x is 3.36 + 134.88 * k: 134.88 um is 3 power-stripe pitches (44.96) and 281 routing tracks (0.48), so each block sits on the stripes and on the routing grid exactly as the block at x = 3.36 did in the probe build. Every y is a multiple of the 3.78 um row height. Corner names are LibreLane's; the blocks' fast corner was characterized at -55 C.",
   "MACROS": {
     "RM_IHPSG13_1P_256x32_c2_bm_bist": {
       "gds": [
@@ -99,12 +99,38 @@
           "location": [1217.28, 3.78],
           "orientation": "FS"
         },
-        "u_mem2": {
-          "location": [273.12, 585.9],
-          "orientation": "N"
-        },
         "u_mem3": {
           "location": [1217.28, 585.9],
+          "orientation": "N"
+        }
+      }
+    },
+    "RM_IHPSG13_1P_512x32_c2_bm_bist": {
+      "gds": [
+        "pdk_dir::libs.ref/sg13cmos5l_sram/gds/RM_IHPSG13_1P_512x32_c2_bm_bist.gds"
+      ],
+      "lef": [
+        "pdk_dir::libs.ref/sg13cmos5l_sram/lef/RM_IHPSG13_1P_512x32_c2_bm_bist.lef"
+      ],
+      "nl": [],
+      "spef": {},
+      "spice": [
+        "pdk_dir::libs.ref/sg13cmos5l_sram/cdl/RM_IHPSG13_1P_512x32_c2_bm_bist.cdl"
+      ],
+      "lib": {
+        "nom_typ_1p20V_25C": [
+          "pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_512x32_c2_bm_bist_typ_1p20V_25C.lib"
+        ],
+        "nom_fast_1p32V_m40C": [
+          "pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_512x32_c2_bm_bist_fast_1p32V_m55C.lib"
+        ],
+        "nom_slow_1p08V_125C": [
+          "pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_512x32_c2_bm_bist_slow_1p08V_125C.lib"
+        ]
+      },
+      "instances": {
+        "u_mem2": {
+          "location": [273.12, 514.08],
           "orientation": "N"
         }
       }
@@ -131,9 +157,9 @@
     "Metal2 1217.28 3.78 1633.92 122.56",
     "Metal3 1217.28 3.78 1633.92 122.56",
     "Metal4 1217.28 3.78 1633.92 122.56",
-    "Metal2 273.12 585.9 689.76 704.68",
-    "Metal3 273.12 585.9 689.76 704.68",
-    "Metal4 273.12 585.9 689.76 704.68",
+    "Metal2 273.12 514.08 689.76 705.42",
+    "Metal3 273.12 514.08 689.76 705.42",
+    "Metal4 273.12 514.08 689.76 705.42",
     "Metal2 1217.28 585.9 1633.92 704.68",
     "Metal3 1217.28 585.9 1633.92 704.68",
     "Metal4 1217.28 585.9 1633.92 704.68"

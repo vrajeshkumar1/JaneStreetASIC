@@ -21,6 +21,7 @@ Source notation, one instruction per line:
 Directives:
 
     .define NAME value      NAME can then be used wherever value could
+    .org ADDRESS            continue at this word address; the gap is filled with halt
 """
 
 import re
@@ -89,6 +90,17 @@ class _Asm:
                 if len(parts) != 3:
                     raise AsmError(f"line {num}: .define NAME value")
                 self.defs[parts[1].lower()] = parts[2].lower()
+                continue
+            if line.startswith(".org"):
+                parts = line.split()
+                try:
+                    where = int(parts[1], 0)
+                except (IndexError, ValueError):
+                    raise AsmError(f"line {num}: .org ADDRESS")
+                if where < len(self.items) or where > 511:
+                    raise AsmError(f"line {num}: .org must move forward and stay below 512")
+                while len(self.items) < where:
+                    self.items.append((num, "(.org fill)", 0, "halt", [], None, 0))
                 continue
             m = re.match(r"^([A-Za-z_]\w*):\s*(.*)$", line)
             if m:
@@ -366,6 +378,14 @@ class _Asm:
             use, base, off = self._mem(ops[1])
             reg = _reg(ops[0]) << (13 if mnem == "ld" else 7)
             return OP[mnem], reg | (base << 10) | (use << 6) | off
+
+        if mnem in ("ldm", "stm"):
+            # One byte of the engine's memory block, at the byte address in rB.
+            m = re.fullmatch(r"\[\s*(r[0-7])\s*\]", ops[1]) if n == 2 else None
+            if not m:
+                raise AsmError(f"{mnem} rN, [rB]")
+            reg = _reg(ops[0]) << (13 if mnem == "ldm" else 7)
+            return OP["ld" if mnem == "ldm" else "st"], (1 << 18) | reg | (_reg(m.group(1)) << 10)
 
         if mnem == "call":
             if n != 1:

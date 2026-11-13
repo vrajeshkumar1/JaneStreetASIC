@@ -17,12 +17,12 @@ over some design choices.
 
 | Part | State |
 |---|---|
-| Specification (`docs/spec.md`) | v0.3; all three parts implemented |
+| Specification (`docs/spec.md`) | v0.4; all three parts implemented |
 | Assembler (`tools/pasm.py`) | Working |
-| Engine (`src/pe_engine.sv`) | Passes 18 simulation tests |
-| Host interface and four-engine top level (`src/project.sv`, `pe_spi.sv`, `pe_regs.sv`, `pe_pins.sv`) | Passes 12 whole-chip simulation tests, also on a gate-level netlist. Not yet through the layout flow |
+| Engine (`src/pe_engine.sv`) | Passes 19 simulation tests |
+| Host interface and four-engine top level (`src/project.sv`, `pe_spi.sv`, `pe_regs.sv`, `pe_pins.sv`) | Passes 14 whole-chip simulation tests |
 | Example programs (`programs/`) | UART, SPI and I2C run in simulation against bus models, on one engine and on four at once |
-| Layout | The probe build (one memory block, test logic) passed the flow. The first four-engine run failed in placement; the cause and the changed flow settings are in `docs/decisions.md`. Whether four engines finish detailed routing is not known yet |
+| Layout | The probe build passed the flow. Four full-size engines could not be routed (`docs/decisions.md`). The present design has four engines of different sizes; its layout run is pending |
 | FPGA prototype, host script for the demo board, low-speed USB program | Not started |
 
 ## Layout of the repository

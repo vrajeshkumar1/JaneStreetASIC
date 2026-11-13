@@ -17,3 +17,6 @@ The figures below are measured in those tests.
 
 Each program starts by setting the pin directions and idle levels it needs,
 because pins are inputs at level 0 after reset.
+
+`i2c_target.s` keeps a 16-byte register map in the data memory, so as written
+it needs engine 3. On an engine with a 4-byte data memory the map is 4 bytes.

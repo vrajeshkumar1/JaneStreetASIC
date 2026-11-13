@@ -13,13 +13,16 @@ from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, RisingEdge
 
 from host import (ATTN_MASK, CTRL, DRIVE_OUT, E_CFG, E_CRC_POLY, E_CRC_WIDTH, E_DEBUG,
-                  E_FIFO, E_PC, E_R0, E_TX_LEVEL, FLAGS, FLAGS_CLR, FLAGS_SET, ID,
+                  E_FIFO, E_R0, E_TX_LEVEL, FLAGS, FLAGS_CLR, FLAGS_SET, ID,
                   OPEN_DRAIN, OWNER_OUT, ST_HALTED, ST_ILLEGAL, ST_RUNNING, ST_RX_EMPTY,
                   ST_RX_FULL, ST_STALLED, ST_TX_EMPTY, ST_TX_FULL, STATUS, Host, Wires,
                   dmem, ereg, prog)
 from models import I2CTargetModel, spi_target
 
 CLOCK_NS = 16.666  # 60 MHz
+
+# (program words, FIFO bytes, data memory bytes) of each engine
+SIZES = {0: (256, 8, 4), 1: (256, 8, 4), 2: (512, 8, 4), 3: (256, 16, 16)}
 
 
 async def start(dut, half_ns=71):
@@ -47,6 +50,7 @@ async def test_registers(dut):
         assert await h.read(ereg(e, E_CFG), 3) == [0x00, 8, 8]
         assert await h.read1(ereg(e, E_CRC_WIDTH)) == 32
         assert await h.status(e) == ST_TX_EMPTY | ST_RX_EMPTY
+        assert await h.sizes(e) == SIZES[e]
 
     # Global registers. The drive enables are written too: every engine's pin
     # levels are 0 after reset, so nothing changes on the pins.
@@ -65,7 +69,7 @@ async def test_registers(dut):
                rng.getrandbits(8), rng.getrandbits(6), rng.getrandbits(6)]
         crc = [rng.getrandbits(8) for _ in range(4)] + [rng.getrandbits(6)]
         regs = [rng.getrandbits(8) for _ in range(16)]
-        mem = [rng.getrandbits(8) for _ in range(16)]
+        mem = [rng.getrandbits(8) for _ in range(SIZES[e][2])]
         expect[e] = (cfg, crc, regs, mem)
         await h.write(ereg(e, E_CFG), cfg)
         await h.write(ereg(e, E_CRC_POLY), crc)
@@ -76,7 +80,9 @@ async def test_registers(dut):
         assert await h.read(ereg(e, E_CFG), 7) == cfg
         assert await h.read(ereg(e, E_CRC_POLY), 5) == crc
         assert await h.read(ereg(e, E_R0), 16) == regs
-        assert await h.read(dmem(e), 16) == mem
+        assert await h.read(dmem(e), len(mem)) == mem
+        if len(mem) < 16:                               # a smaller memory repeats
+            assert await h.read(dmem(e, len(mem)), len(mem)) == mem
 
     # Addresses with nothing behind them read as zero.
     assert await h.read(0x0300, 2) == [0, 0]
@@ -104,6 +110,11 @@ async def test_program_memory(dut):
     assert await h.read(prog(3), 1024) == as_bytes(full)
     for e in range(3):
         assert await h.read(prog(e, 100 + e), 16) == as_bytes(part[e])
+    # Engine 2 has 512 words: word 300 is not word 44.
+    await h.write(prog(2, 44), as_bytes([0xAAAA0044]))
+    await h.write(prog(2, 300), as_bytes([0xBBBB0300]))
+    assert await h.read(prog(2, 44), 4) == as_bytes([0xAAAA0044])
+    assert await h.read(prog(2, 300), 4) == as_bytes([0xBBBB0300])
     # A read that starts inside a word and runs across word boundaries.
     assert await h.read(prog(3, 10) + 2, 7) == as_bytes(full[10:13])[2:9]
 
@@ -145,22 +156,22 @@ async def test_engine_program(dut):
     assert await h.reg(e, 0) == 0x1234 + 6 * 3
     assert await h.reg(e, 1) == 0xFFFF            # "rN--" counts down past zero
     assert await h.read1(dmem(e, 2)) == 0x46
-    assert await h.read1(ereg(e, E_PC)) == 5
+    assert await h.pc(e) == 5
     # The other engines were not touched.
     for other in (0, 2, 3):
         assert await h.status(other) == ST_TX_EMPTY | ST_RX_EMPTY
 
     # Registers and the program counter are closed to the host while ENABLE is set.
     await h.set_reg(e, 0, 0xFFFF)
-    await h.write(ereg(e, E_PC), 0)
+    await h.set_pc(e, 0)
     assert await h.reg(e, 0) == 0x1246
-    assert await h.read1(ereg(e, E_PC)) == 5
+    assert await h.pc(e) == 5
 
     await h.enable(0)
     await h.restart(1 << e)
     assert await h.status(e) == ST_TX_EMPTY | ST_RX_EMPTY
-    assert await h.read1(ereg(e, E_PC)) == 0
-    await h.write(ereg(e, E_PC), p.labels["alt"])
+    assert await h.pc(e) == 0
+    await h.set_pc(e, p.labels["alt"])
     await h.enable(1 << e)
     await h.wait_halt(e)
     assert await h.reg(e, 0) == 0x00AA
@@ -171,16 +182,20 @@ async def test_fifos(dut):
     """Host side of the FIFOs: levels, full and empty, the four DEBUG bits,
     and a read that stops part-way through a byte."""
     w, h = await start(dut)
-    e = 2
+    for e in (2, 3):                                    # an 8-byte and a 16-byte engine
+        await fifo_checks(w, h, e, SIZES[e][1])
+
+
+async def fifo_checks(w, h, e, depth):
     await h.load(e, """
     loop:   pull
             mov isr, osr, inv
             push
             jmp loop
     """)
-    data = [0x30 + i for i in range(16)]
+    data = [0x30 + i for i in range(depth)]
     await h.push(e, data)
-    assert await h.read1(ereg(e, E_TX_LEVEL)) == 16
+    assert await h.read1(ereg(e, E_TX_LEVEL)) == depth
     assert await h.status(e) == ST_TX_FULL | ST_RX_EMPTY
     assert await h.read1(ereg(e, E_DEBUG)) == 0
     await h.push(e, 0x99)                               # one too many
@@ -190,9 +205,9 @@ async def test_fifos(dut):
 
     await h.enable(1 << e)
     for _ in range(50):
-        if await h.rx_level(e) == 16:
+        if await h.rx_level(e) == depth:
             break
-    assert await h.rx_level(e) == 16
+    assert await h.rx_level(e) == depth
     assert await h.status(e) & ST_RX_FULL
 
     # Four clock pulses into the first data byte, then stop: nothing is lost.
@@ -206,12 +221,12 @@ async def test_fifos(dut):
         await h._half()
         w.set_in(h.SCK, 0)
     await h._end()
-    assert await h.rx_level(e) == 16
+    assert await h.rx_level(e) == depth
 
     # With in1 idling high, every transfer ends with one extra rising edge on
     # the SPI clock pin (the host putting the pin back). It must not pop.
     w.set_in(1, 1)
-    assert await h.pop(e, 16) == [v ^ 0xFF for v in data]
+    assert await h.pop(e, depth) == [v ^ 0xFF for v in data]
     assert await h.rx_level(e) == 0
     assert await h.read1(ereg(e, E_DEBUG)) == 0
     await h.pop(e, 1)                                   # nothing there
@@ -223,9 +238,9 @@ async def test_fifos(dut):
     # found no room, both without waiting.
     await h.enable(0)
     await h.restart(1 << e)
-    await h.load(e, """
+    await h.load(e, f"""
             pull noblock
-            set r0, 16
+            set r0, {depth}
     fill:   mov isr, r0
             push noblock
             jmp r0--, fill
@@ -234,12 +249,12 @@ async def test_fifos(dut):
     await h.enable(1 << e)
     await h.wait_halt(e)
     assert await h.read1(ereg(e, E_DEBUG)) == 0x0C
-    assert await h.rx_level(e) == 16
+    assert await h.rx_level(e) == depth
     await h.write(ereg(e, E_DEBUG), 0x04)
     assert await h.read1(ereg(e, E_DEBUG)) == 0x08
     await h.write(ereg(e, E_DEBUG), 0x08)
     assert await h.read1(ereg(e, E_DEBUG)) == 0
-    assert await h.pop(e, 3) == [16, 15, 14]
+    assert await h.pop(e, 3) == [depth, depth - 1, depth - 2]
 
     # RESTART empties both FIFOs.
     await h.enable(0)
@@ -263,6 +278,79 @@ async def test_fast_host_clock(dut):
     data = [0x00, 0xFF, 0xA5, 0x5A, 0x81, 0x7E, 0x01, 0x80]
     await h.push(0, data)
     assert await h.wait_rx(0, 8) == data
+
+
+@cocotb.test()
+async def test_memory_block_data(dut):
+    """ldm and stm: a program keeps data bytes in the spare part of its own
+    memory block, and the host finds them there afterwards."""
+    w, h = await start(dut)
+    for e, base in ((0, 400), (2, 1600)):               # byte addresses: word 100, word 400
+        word = base // 4
+        await h.write(prog(e, word), [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88])
+        await h.load(e, f"""
+                set r1, {base}
+                ldm r2, [r1]          ; 0x11, written by the host
+                add r1, r1, 3
+                ldm r3, [r1]          ; 0x44
+                set r0, 0xA5
+                stm r0, [r1]          ; replace 0x44; its neighbours stay
+                ldm r4, [r1]
+                add r1, r1, 2
+                set r0, 0x3C
+                ifn stm r0, [r1]      ; T is 0: stored at byte 5
+                ift stm r0, [r1]      ; skipped
+                ldm r5, [r1]  [3]
+                set r6, 0x77          ; runs after the delay, with the right instruction
+                halt
+        """)
+        await h.enable(1 << e)
+        await h.wait_halt(e)
+        assert [await h.reg(e, n) for n in (2, 3, 4, 5, 6)] == [0x11, 0x44, 0xA5, 0x3C, 0x77]
+        await h.enable(0)
+        assert await h.read(prog(e, word), 8) == [0x11, 0x22, 0x33, 0xA5, 0x55, 0x3C, 0x77, 0x88]
+        # The program itself is intact.
+        await h.restart(1 << e)
+        await h.enable(1 << e)
+        await h.wait_halt(e)
+        assert await h.reg(e, 3) == 0xA5
+        await h.enable(0)
+
+
+@cocotb.test()
+async def test_large_program_memory(dut):
+    """Engine 2 runs code above word 255, reached by a jump and by setting
+    the program counter."""
+    w, h = await start(dut, half_ns=42)
+    e = 2
+    p = await h.load(e, """
+            set r0, 1
+            jmp far
+    back:   add r0, r0, 0x10
+            halt
+            .org 300
+    far:    add r0, r0, 0x100
+            mov r1, pc            ; 301
+            call sub
+            jmp back
+    sub:    mov r2, lr            ; 303
+            ret
+    entry:  set r0, 0x7000
+            halt
+    """)
+    assert p.labels["far"] == 300
+    await h.enable(1 << e)
+    await h.wait_halt(e)
+    assert [await h.reg(e, n) for n in (0, 1, 2)] == [0x111, 301, 303]
+    assert await h.pc(e) == 3
+    await h.enable(0)
+    await h.restart(1 << e)
+    await h.set_pc(e, p.labels["entry"])
+    assert await h.pc(e) == p.labels["entry"]
+    await h.enable(1 << e)
+    await h.wait_halt(e)
+    assert await h.reg(e, 0) == 0x7000
+    assert await h.pc(e) == p.labels["entry"] + 1
 
 
 # ------------------------------------------------------------- protocols
@@ -564,7 +652,7 @@ async def test_illegal_instruction(dut):
     await h.enable(1 << e)
     st = await h.wait_halt(e)
     assert st & ST_ILLEGAL
-    assert await h.read1(ereg(e, E_PC)) == 1
+    assert await h.pc(e) == 1
     assert await h.reg(e, 0) == 7
     await h.enable(0)
     await h.restart(1 << e)

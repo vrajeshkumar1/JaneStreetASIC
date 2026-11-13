@@ -1,16 +1,17 @@
-# Specification v0.3
+# Specification v0.4
 
 Status: all three parts are implemented and tested in simulation. Part 1 is the
 instruction set (`src/pe_engine.sv`), part 2 the host interface
 (`src/pe_spi.sv`, `src/pe_regs.sv`), part 3 the pins (`src/pe_pins.sv`). Where
 a rule was chosen without a requirement behind it, `docs/decisions.md` says so.
 
-Changes from v0.2: the operand fields of `jmp`, `jbit`, `wait`, `in`, `out`,
-`mov`, `irq`, `ld` and `st` moved (section 1.5), so that a register number or a
-pin number is always in the same bits; the assembler notation did not change.
-Timing rules 6 and 7 now include the output flip-flop. Part 2 gained the SPI
-clock limit, the rule for when a FIFO byte is removed, reset values and the
-start-up order.
+Changes from v0.3: the four engines are no longer the same size (section
+1.1), because four full-size engines could not be routed on the tile. New
+instructions `ldm` and `stm` reach the spare part of an engine's program memory
+(section 1.5). Program memory moved in the host address map and engine 2's is
+twice as large (section 2.3); the program counter is written as two bytes and
+two read-only registers give an engine's sizes (section 2.5). The assembler
+gained `.org`.
 
 Terms used throughout:
 
@@ -42,18 +43,37 @@ Terms used throughout:
 | `Z`, `C` | 1 bit each | Equal and less-than results of the last `cmp` |
 | `wtime` | 16 bits | Ticks the most recent `wait` spent stalled (stops at 0xFFFF) |
 | `crc` | 32 bits | Checksum register (section 1.8) |
-| TX FIFO | 16 bytes | Host to engine |
-| RX FIFO | 16 bytes | Engine to host |
-| Data memory | 16 bytes | Addressed by `ld` and `st`; the host can read and write it |
+| TX FIFO | 8 or 16 bytes | Host to engine |
+| RX FIFO | 8 or 16 bytes | Engine to host |
+| Data memory | 4 or 16 bytes | Flip-flops, reached in one tick by `ld` and `st`; the host can read and write it |
 
 All engines share eight one-bit flags, `F0`..`F7`, used to signal each other and
 the host.
 
-Each engine has its own 256-word program memory (one IHP 256 x 32 memory block).
+Each engine has its own program memory, one IHP memory block of 256 or 512
+words. A program rarely fills it (the largest example is 55 words), and the
+rest is available to the program as byte-addressed data through `ldm` and
+`stm`: byte address A is byte A mod 4 of word A / 4, lowest byte first, the
+same layout the host sees. The hardware does not stop a program from storing
+over its own instructions.
+
+The engines differ in size:
+
+| Engine | Program memory | FIFOs, each way | Data memory | Intended for |
+|---|---|---|---|---|
+| 0 | 256 words (1,024 bytes) | 8 bytes | 4 bytes | UART, SPI, I2C |
+| 1 | 256 words (1,024 bytes) | 8 bytes | 4 bytes | UART, SPI, I2C |
+| 2 | 512 words (2,048 bytes) | 8 bytes | 4 bytes | Protocols with long frames, held in the memory block |
+| 3 | 256 words (1,024 bytes) | 16 bytes | 16 bytes | Protocols that need more FIFO room, such as low-speed USB |
+
+Everything else is the same in all four, so a program that fits an engine's
+sizes runs on any of them.
 
 ### 1.2 Timing rules
 
 1. An instruction that does not stall takes exactly one tick, plus its delay.
+   `ldm` and `stm` are the exception: two ticks, plus the delay. Their
+   side-set is applied on the first of the two.
 2. A stalled instruction repeats each tick until it can complete. Its delay
    starts after it completes.
 3. Side-set (section 1.4) is applied on the first tick of the instruction, even
@@ -125,8 +145,10 @@ opcode:
 | 8 | `set` | 18:16 reg, 15:0 value | reg <- 16-bit value |
 | 9 | ALU, register | 18:16 function, 15:13 rd, 12:10 ra, 9:7 rb | rd <- ra (function) rb |
 | 10 | ALU, immediate | 18:16 function, 15:13 rd, 12:10 ra, 9:0 value | rd <- ra (function) value, value zero-extended |
-| 11 | `ld` | 15:13 rd, 12:10 base reg, 6 use base, 3:0 offset | rd <- data memory[(base + offset) mod 16], zero-extended |
-| 12 | `st` | 12:10 base reg, 9:7 rs, 6 use base, 3:0 offset | data memory[(base + offset) mod 16] <- low byte of rs |
+| 11 | `ld` | 18 = 0, 15:13 rd, 12:10 base reg, 6 use base, 3:0 offset | rd <- data memory[(base + offset) mod size], zero-extended. Size is the engine's data memory size |
+| 11 | `ldm` | 18 = 1, 15:13 rd, 12:10 base reg | rd <- the byte of the program memory at the byte address in the base register, zero-extended. Takes two ticks |
+| 12 | `st` | 18 = 0, 12:10 base reg, 9:7 rs, 6 use base, 3:0 offset | data memory[(base + offset) mod size] <- low byte of rs |
+| 12 | `stm` | 18 = 1, 12:10 base reg, 9:7 rs | the byte of the program memory at the byte address in the base register <- low byte of rs; the other three bytes of that word keep their values. Takes two ticks |
 | 13 | `call` / `ret` | 18 which, 8:0 target | which 0 `call`: `lr` <- `pc` + 1, jump to target. which 1 `ret`: jump to `lr` |
 | 14 | pin | 18:17 operation, 16:13 pin, 12 value | 0 `set pin`: level <- value. 1 `toggle pin`: invert the level. 2 `set dir`: direction <- value (1 = output; bidirectional pins only) |
 | 15 | `halt` | none | Stop this engine and set its HALTED status bit |
@@ -243,7 +265,9 @@ label:  [ift|ifn] mnemonic operands   [side V] [[N]]   ; comment
 
 `side V` is the side-set value (0 to 3) and `[N]` the delay. Pin operands are
 written `in0`..`in7`, `out0`..`out7`, `io0`..`io7`, or a name given with
-`.define`. Memory operands are `[rN]`, `[rN+offset]` or `[@offset]`. The
+`.define`. Memory operands are `[rN]`, `[rN+offset]` or `[@offset]` for `ld`
+and `st`, and `[rN]` for `ldm` and `stm`. `.org N` continues the program at
+word N and fills the gap with `halt`. The
 assembler is `tools/pasm.py`; its source lists every operand form. The programs
 in `programs/` use this notation.
 
@@ -310,8 +334,8 @@ a transfer that ends part-way through a byte loses nothing.
 |---|---|
 | 0x0000..0x003F | Global registers (2.4) |
 | 0x0100 + 0x40 x e | Registers of engine e (2.5) |
-| 0x0200 + 0x10 x e | Data memory of engine e, 16 bytes |
-| 0x1000 + 0x400 x e | Program memory of engine e: 256 words, 4 bytes each, lowest byte first. A word is stored when its fourth byte arrives, so writes start at a multiple of 4. Accessible only while the engine's `ENABLE` bit is 0; otherwise writes are ignored and reads return 0 |
+| 0x0200 + 0x10 x e | Data memory of engine e. A 4-byte memory repeats four times in the 16 addresses |
+| 0x4000 + 0x800 x e | Program memory of engine e: up to 512 words, 4 bytes each, lowest byte first (a 256-word memory repeats in the upper half). A word is stored when its fourth byte arrives, so writes start at a multiple of 4. Accessible only while the engine's `ENABLE` bit is 0; otherwise writes are ignored and reads return 0 |
 
 Any other address reads as 0 and ignores writes.
 
@@ -351,7 +375,7 @@ to be written while the engine is stopped.
 | 0x03, 0x04 | `CLKDIV` | read/write | Tick length is `CLKDIV + 1` clocks |
 | 0x05 | `SIDE0` | read/write | Bits 3:0 writable pin number, bit 4 enable, bit 5: 1 = direction, 0 = level |
 | 0x06 | `SIDE1` | read/write | As `SIDE0` |
-| 0x07, 0x08 | `PC` | read/write | Program counter (0x08 reads 0 with a 256-word memory). Writable while the engine's `ENABLE` bit is 0 |
+| 0x07, 0x08 | `PC` | read/write | Program counter: low 8 bits at 0x07, bit 8 at 0x08 (always 0 on a 256-word engine). Writing one byte keeps the other. Writable while the engine's `ENABLE` bit is 0 |
 | 0x09 | `STATUS` | read | Bit 0 running (enabled and not halted), 1 stalled, 2 halted, 3 illegal instruction, 4 TX empty, 5 TX full, 6 RX empty, 7 RX full |
 | 0x0A | `TX_LEVEL` | read | Bytes in the TX FIFO |
 | 0x0B | `RX_LEVEL` | read | Bytes in the RX FIFO |
@@ -359,7 +383,9 @@ to be written while the engine is stopped.
 | 0x0D | `DEBUG` | read, write 1 to clear | Bit 0: host wrote to a full TX FIFO. 1: host read an empty RX FIFO. 2: non-blocking pull found the FIFO empty. 3: non-blocking push found it full |
 | 0x0E..0x11 | `CRC_POLY` | read/write | Checksum polynomial, lowest byte first |
 | 0x12 | `CRC_WIDTH` | read/write | 1 to 32 (used by direction 1) |
+| 0x13 | `SIZES` | read | Bits 3:0: base-2 logarithm of the program memory's words (8 or 9). Bits 7:4: base-2 logarithm of each FIFO's bytes (3 or 4) |
 | 0x14..0x17 | `CRC` | read | Current checksum value |
+| 0x18 | `DM_SIZE` | read | Bits 3:0: base-2 logarithm of the data memory's bytes (2 or 4) |
 | 0x20..0x2F | `R0`..`R7` | read/write | The registers, two bytes each, lowest byte first. Writable while the engine's `ENABLE` bit is 0 |
 
 ### 2.6 After reset
