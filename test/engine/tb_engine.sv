@@ -45,7 +45,8 @@ module tb_engine ();
   reg [7:0]  h_dm_wdata;
   reg        h_reg_we;
   reg [2:0]  h_reg_sel;
-  reg [15:0] h_reg_wdata;
+  reg        h_reg_hi;
+  reg [7:0]  h_reg_wdata;
   reg        h_pc_we;
   reg [7:0]  h_pc_wdata;
   reg [7:0]  h_flag_set, h_flag_clr;
@@ -187,6 +188,7 @@ module tb_engine ();
       .dm_rdata_o       (dm_rdata),
       .hreg_we_i        (h_reg_we),
       .hreg_sel_i       (h_reg_sel),
+      .hreg_hi_i        (h_reg_hi),
       .hreg_wdata_i     (h_reg_wdata),
       .hreg_rdata_o     (reg_rdata),
       .pc_we_i          (h_pc_we),

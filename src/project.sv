@@ -46,6 +46,12 @@ module tt_um_vrajeshkumar1_janestreetasic (
   localparam int unsigned DM_BIG   = 4;   // engine 3
   localparam int unsigned DM_STD   = 2;
 
+  // Units an engine may be built without (docs/spec.md, section 1.1). Bit e
+  // is engine e.
+  localparam logic [3:0] CRC_ENGINES    = 4'b1100;  // checksum unit
+  localparam logic [3:0] BSHIFT_ENGINES = 4'b1100;  // shl / shr by 0..15 places
+  localparam bit         HOST_RB        = 1'b0;     // 1 = the host can read r0..r7 and the data memory
+
   // ---------------------------------------------------------------- reset
   logic rst_meta_q, rst_sync_q;
   always_ff @(posedge clk or negedge rst_n) begin
@@ -132,6 +138,7 @@ module tt_um_vrajeshkumar1_janestreetasic (
   wire [NE-1:0]    pc_we;
   wire [8:0]       pc_wdata;
   wire [NE*12-1:0] eng_size;
+  wire [NE*2-1:0]  eng_feat;
 
   wire [NE-1:0]    tx_push, tx_full, tx_empty, rx_pop, rx_empty, rx_full;
   wire [7:0]       tx_data;
@@ -145,7 +152,8 @@ module tt_um_vrajeshkumar1_janestreetasic (
 
   wire [NE-1:0]    hreg_we;
   wire [2:0]       hreg_sel;
-  wire [15:0]      hreg_wdata;
+  wire             hreg_hi;
+  wire [7:0]       hreg_wdata;
   wire [NE*16-1:0] hreg_rdata;
 
   wire [NE-1:0]    prog_we, prog_re;
@@ -165,7 +173,7 @@ module tt_um_vrajeshkumar1_janestreetasic (
     end
   end
 
-  pe_regs #(.NE(NE)) u_regs (
+  pe_regs #(.NE(NE), .HAS_CRC(CRC_ENGINES), .HOST_RB(HOST_RB)) u_regs (
       .clk              (clk),
       .rst_ni           (rst_ni),
       .addr_i           (bus_addr),
@@ -210,6 +218,7 @@ module tt_um_vrajeshkumar1_janestreetasic (
       .pc_we_o          (pc_we),
       .pc_wdata_o       (pc_wdata),
       .size_i           (eng_size),
+      .feat_i           (eng_feat),
       .tx_push_o        (tx_push),
       .tx_data_o        (tx_data),
       .tx_full_i        (tx_full),
@@ -226,6 +235,7 @@ module tt_um_vrajeshkumar1_janestreetasic (
       .dm_rdata_i       (dm_rdata),
       .hreg_we_o        (hreg_we),
       .hreg_sel_o       (hreg_sel),
+      .hreg_hi_o        (hreg_hi),
       .hreg_wdata_o     (hreg_wdata),
       .hreg_rdata_i     (hreg_rdata),
       .prog_we_o        (prog_we),
@@ -248,6 +258,8 @@ module tt_um_vrajeshkumar1_janestreetasic (
       localparam int unsigned AW_G   = (g == 2) ? AW_BIG   : AW_STD;
       localparam int unsigned FIFO_G = (g == 3) ? FIFO_BIG : FIFO_STD;
       localparam int unsigned DM_G   = (g == 3) ? DM_BIG   : DM_STD;
+      localparam bit          CRC_G  = CRC_ENGINES[g];
+      localparam bit          BSH_G  = BSHIFT_ENGINES[g];
 
       wire [AW_G-1:0] e_addr, e_pc;
 
@@ -262,8 +274,10 @@ module tt_um_vrajeshkumar1_janestreetasic (
       assign eng_addr[g*9 +: 9]   = addr9;
       assign pc[g*9 +: 9]         = pc9;
       assign eng_size[g*12 +: 12] = {DM_G[3:0], FIFO_G[3:0], AW_G[3:0]};
+      assign eng_feat[g*2 +: 2]   = {BSH_G, CRC_G};
 
-      pe_engine #(.AW(AW_G), .FIFO_AW(FIFO_G), .DM_AW(DM_G)) u_engine (
+      pe_engine #(.AW(AW_G), .FIFO_AW(FIFO_G), .DM_AW(DM_G),
+                  .HAS_CRC(CRC_G), .HAS_BSHIFT(BSH_G), .HOST_RB(HOST_RB)) u_engine (
           .clk              (clk),
           .rst_ni           (rst_ni),
           .enable_i         (enable[g]),
@@ -308,7 +322,8 @@ module tt_um_vrajeshkumar1_janestreetasic (
           .dm_rdata_o       (dm_rdata[g*8 +: 8]),
           .hreg_we_i        (hreg_we[g]),
           .hreg_sel_i       (hreg_sel),
-          .hreg_wdata_i     (hreg_wdata),
+          .hreg_hi_i        (hreg_hi),
+      .hreg_wdata_i     (hreg_wdata),
           .hreg_rdata_o     (hreg_rdata[g*16 +: 16]),
           .pc_we_i          (pc_we[g]),
           .pc_wdata_i       (pc_wdata[AW_G-1:0]),

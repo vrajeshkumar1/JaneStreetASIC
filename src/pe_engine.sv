@@ -15,7 +15,10 @@
 module pe_engine #(
     parameter int unsigned AW      = 8,    // program address width (256 words)
     parameter int unsigned FIFO_AW = 4,    // each FIFO holds 2**FIFO_AW bytes (at most 4)
-    parameter int unsigned DM_AW   = 4     // the data memory holds 2**DM_AW bytes (at most 4)
+    parameter int unsigned DM_AW   = 4,    // the data memory holds 2**DM_AW bytes (at most 4)
+    parameter bit          HAS_CRC    = 1'b1,  // 0 = no checksum unit: crc reads as zero
+    parameter bit          HAS_BSHIFT = 1'b1,  // 0 = shl / shr always shift by one place
+    parameter bit          HOST_RB    = 1'b1   // 0 = the host cannot read r0..r7 or the data memory
 ) (
     input  wire         clk,
     input  wire         rst_ni,
@@ -77,7 +80,8 @@ module pe_engine #(
     // ---- host access to the registers and the program counter
     input  wire         hreg_we_i,
     input  wire [2:0]   hreg_sel_i,
-    input  wire [15:0]  hreg_wdata_i,
+    input  wire         hreg_hi_i,         // 0 = low byte of the register, 1 = high byte
+    input  wire [7:0]   hreg_wdata_i,
     output wire [15:0]  hreg_rdata_o,
     input  wire         pc_we_i,
     input  wire [AW-1:0] pc_wdata_i,
@@ -123,7 +127,7 @@ module pe_engine #(
   logic [15:0]   level_q, level_d;
   logic [7:0]    dir_q, dir_d;
   logic [31:0]   crc_q, crc_d;
-  logic [(8<<DM_AW)-1:0] dm_q;        // data memory, 2**DM_AW bytes
+  wire  [(8<<DM_AW)-1:0] dm_q;        // data memory, 2**DM_AW bytes (latches)
   logic [3:0]    delay_q, delay_d;
   logic          halted_q, halted_d, illegal_q, illegal_d;
   logic [1:0]    dbg_q, dbg_d;
@@ -204,6 +208,7 @@ module pe_engine #(
 
   // ------------------------------------------------------------------ ALU
   wire [15:0] alu_b = (op == OP_ALUI) ? {6'd0, ir[9:0]} : rb_val;
+  wire [3:0]  sh_amt = HAS_BSHIFT ? alu_b[3:0] : 4'd1;
   logic [15:0] alu_y;
   always_comb begin
     case (ir[18:16])
@@ -212,8 +217,8 @@ module pe_engine #(
       3'd2:    alu_y = ra_val & alu_b;
       3'd3:    alu_y = ra_val | alu_b;
       3'd4:    alu_y = ra_val ^ alu_b;
-      3'd5:    alu_y = ra_val << alu_b[3:0];
-      3'd6:    alu_y = ra_val >> alu_b[3:0];
+      3'd5:    alu_y = ra_val << sh_amt;
+      3'd6:    alu_y = ra_val >> sh_amt;
       default: alu_y = ra_val;
     endcase
   end
@@ -289,7 +294,7 @@ module pe_engine #(
   wire [DM_AW-1:0] dm_addr   = dm_sum[DM_AW-1:0];
   wire [DM_AW-1:0] dm_addr_h = dm_addr_i[DM_AW-1:0];
   wire [7:0]       dm_rd     = dm_q[dm_addr*8 +: 8];
-  assign dm_rdata_o          = dm_q[dm_addr_h*8 +: 8];
+  assign dm_rdata_o          = HOST_RB ? dm_q[dm_addr_h*8 +: 8] : 8'h00;
   // The upper address bits are not used when the memory is smaller than 16 bytes.
   wire _unused_dm = &{1'b0, dm_sum, dm_addr_i};
 
@@ -650,6 +655,7 @@ module pe_engine #(
     end
 
     if (crc_step) crc_d = crc_next;
+    if (!HAS_CRC) crc_d = '0;
   end
 
   // An illegal word or a halt stops the engine without advancing.
@@ -730,7 +736,6 @@ module pe_engine #(
       level_q    <= '0;
       dir_q      <= '0;
       crc_q      <= '0;
-      dm_q       <= '0;
       delay_q    <= '0;
       halted_q   <= 1'b0;
       illegal_q  <= 1'b0;
@@ -810,18 +815,24 @@ module pe_engine #(
 
       // Registers: the engine's write wins over a host write on the same clock.
       if (rw_en) r_q[rw_idx*16 +: 16] <= rw_data;
-      else if (hreg_we_i) r_q[hreg_sel_i*16 +: 16] <= hreg_wdata_i;
+      else if (hreg_we_i) r_q[{hreg_sel_i, hreg_hi_i}*8 +: 8] <= hreg_wdata_i;
 
-      // Data memory, same rule.
-      if (dm_we) dm_q[dm_addr*8 +: 8] <= rb_val[7:0];
-      else if (dm_we_i) dm_q[dm_addr_h*8 +: 8] <= dm_wdata_i;
     end
   end
+
+  // Data memory: the engine's write wins over a host write on the same clock.
+  pe_lmem #(.AW(DM_AW)) u_dm (
+      .clk(clk), .rst_ni(rst_ni),
+      .we_i   (dm_we | dm_we_i),
+      .waddr_i(dm_we ? dm_addr : dm_addr_h),
+      .wdata_i(dm_we ? rb_val[7:0] : dm_wdata_i),
+      .q_o    (dm_q)
+  );
 
   // -------------------------------------------------------------- outputs
   assign pin_level_o  = level_q;
   assign pin_dir_o    = dir_q;
-  assign hreg_rdata_o = r_q[hreg_sel_i*16 +: 16];
+  assign hreg_rdata_o = HOST_RB ? r_q[hreg_sel_i*16 +: 16] : 16'h0000;
   assign pc_o         = pc_q;
   assign stalled_o    = stall_q;
   assign halted_o     = halted_q;

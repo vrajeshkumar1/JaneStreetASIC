@@ -35,7 +35,7 @@ class Bench:
                      "cfg_autopush", "cfg_side0", "cfg_side1", "cfg_crc_dir",
                      "cfg_crc_poly", "cfg_open_drain", "h_prog_we", "h_prog_addr",
                      "h_prog_wdata", "h_tx_push", "h_tx_data", "h_rx_pop", "h_dm_we",
-                     "h_dm_addr", "h_dm_wdata", "h_reg_we", "h_reg_sel", "h_reg_wdata",
+                     "h_dm_addr", "h_dm_wdata", "h_reg_we", "h_reg_sel", "h_reg_hi", "h_reg_wdata",
                      "h_pc_we", "h_pc_wdata", "h_flag_set", "h_flag_clr", "cfg_clkdiv"):
             getattr(d, name).value = 0
         d.cfg_pull_thresh.value = 8
@@ -130,10 +130,13 @@ class Bench:
     async def set_reg(self, n, value):
         d = self.dut
         await FallingEdge(d.clk)
+        # The host writes a register one byte at a time.
         d.h_reg_sel.value = n
-        d.h_reg_wdata.value = value
-        d.h_reg_we.value = 1
-        await FallingEdge(d.clk)
+        for hi in (0, 1):
+            d.h_reg_hi.value = hi
+            d.h_reg_wdata.value = (value >> (8 * hi)) & 0xFF
+            d.h_reg_we.value = 1
+            await FallingEdge(d.clk)
         d.h_reg_we.value = 0
 
     async def dm_write(self, addr, value):

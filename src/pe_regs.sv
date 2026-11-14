@@ -22,7 +22,9 @@
 `default_nettype none
 
 module pe_regs #(
-    parameter int unsigned NE = 4          // number of engines, 1..4
+    parameter int unsigned NE = 4,         // number of engines, 1..4
+    parameter logic [3:0]  HAS_CRC = 4'b1111,   // bit e: engine e has a checksum unit
+    parameter bit          HOST_RB = 1'b1       // 0 = r0..r7 and the data memory read as zero
 ) (
     input  wire            clk,
     input  wire            rst_ni,
@@ -85,6 +87,7 @@ module pe_regs #(
     // ---- sizes of each engine, constants: [3:0] log2 of program words,
     //      [7:4] log2 of FIFO bytes, [11:8] log2 of data memory bytes
     input  wire [NE*12-1:0] size_i,
+    input  wire [NE*2-1:0]  feat_i,         // [0] checksum unit, [1] 16-place shifter
 
     // ---- FIFOs
     output wire [NE-1:0]    tx_push_o,
@@ -107,7 +110,8 @@ module pe_regs #(
     // ---- registers r0..r7
     output wire [NE-1:0]    hreg_we_o,
     output wire [2:0]       hreg_sel_o,
-    output wire [15:0]      hreg_wdata_o,
+    output wire             hreg_hi_o,
+    output wire [7:0]       hreg_wdata_o,
     input  wire [NE*16-1:0] hreg_rdata_i,
 
     // ---- program memory
@@ -242,7 +246,8 @@ module pe_regs #(
   genvar g;
   generate
     for (g = 0; g < NE; g = g + 1) begin : g_ereg
-      logic [4:0]  cfg_q;        // [0] out_dir [1] in_dir [2] autopull [3] autopush [4] crc_dir
+      logic [3:0]  cfg_q;        // [0] out_dir [1] in_dir [2] autopull [3] autopush
+      logic        crcdir_q;     // CFG bit 4
       logic [3:0]  pull_q, push_q;
       logic [15:0] clkdiv_q;
       logic [5:0]  side0_q, side1_q;
@@ -261,24 +266,17 @@ module pe_regs #(
           clkdiv_q <= '0;
           side0_q  <= '0;
           side1_q  <= '0;
-          poly_q   <= '0;
-          width_q  <= 6'd32;
           hdbg_q   <= '0;
         end else begin
           if (we) begin
             case (off)
-              6'h00: cfg_q           <= wdata_i[4:0];
+              6'h00: cfg_q           <= wdata_i[3:0];
               6'h01: pull_q          <= wdata_i[3:0];
               6'h02: push_q          <= wdata_i[3:0];
               6'h03: clkdiv_q[7:0]   <= wdata_i;
               6'h04: clkdiv_q[15:8]  <= wdata_i;
               6'h05: side0_q         <= wdata_i[5:0];
               6'h06: side1_q         <= wdata_i[5:0];
-              6'h0E: poly_q[7:0]     <= wdata_i;
-              6'h0F: poly_q[15:8]    <= wdata_i;
-              6'h10: poly_q[23:16]   <= wdata_i;
-              6'h11: poly_q[31:24]   <= wdata_i;
-              6'h12: width_q         <= wdata_i[5:0];
               default: ;
             endcase
           end
@@ -292,11 +290,37 @@ module pe_regs #(
         end
       end
 
+      // Checksum settings exist only on an engine that has the unit; on the
+      // others they read as zero.
+      if (HAS_CRC[g]) begin : g_crc
+        always_ff @(posedge clk or negedge rst_ni) begin
+          if (!rst_ni) begin
+            crcdir_q <= 1'b0;
+            poly_q   <= '0;
+            width_q  <= 6'd32;
+          end else if (we) begin
+            case (off)
+              6'h00: crcdir_q        <= wdata_i[4];
+              6'h0E: poly_q[7:0]     <= wdata_i;
+              6'h0F: poly_q[15:8]    <= wdata_i;
+              6'h10: poly_q[23:16]   <= wdata_i;
+              6'h11: poly_q[31:24]   <= wdata_i;
+              6'h12: width_q         <= wdata_i[5:0];
+              default: ;
+            endcase
+          end
+        end
+      end else begin : g_nocrc
+        assign crcdir_q = 1'b0;
+        assign poly_q   = '0;
+        assign width_q  = '0;
+      end
+
       assign cfg_out_dir_o[g]            = cfg_q[0];
       assign cfg_in_dir_o[g]             = cfg_q[1];
       assign cfg_autopull_o[g]           = cfg_q[2];
       assign cfg_autopush_o[g]           = cfg_q[3];
-      assign cfg_crc_dir_o[g]            = cfg_q[4];
+      assign cfg_crc_dir_o[g]            = crcdir_q;
       assign cfg_pull_thresh_o[g*4 +: 4] = pull_q;
       assign cfg_push_thresh_o[g*4 +: 4] = push_q;
       assign cfg_clkdiv_o[g*16 +: 16]    = clkdiv_q;
@@ -312,13 +336,13 @@ module pe_regs #(
       assign dbg_clr_o[g*2 +: 2] = (we && off == 6'h0D) ? wdata_i[3:2] : 2'b00;
       assign hreg_we_o[g]        = we & (off[5:4] == 2'b10) & ~enable_q[g];
 
-      wire [15:0] r_val   = hreg_rdata_i[g*16 +: 16];
+      wire [15:0] r_val   = HOST_RB ? hreg_rdata_i[g*16 +: 16] : 16'h0000;
       wire [31:0] crc_val = crc_i[g*32 +: 32];
 
       logic [7:0] rd;
       always_comb begin
         case (off)
-          6'h00:   rd = {3'b000, cfg_q};
+          6'h00:   rd = {3'b000, crcdir_q, cfg_q};
           6'h01:   rd = {4'h0, pull_q};
           6'h02:   rd = {4'h0, push_q};
           6'h03:   rd = clkdiv_q[7:0];
@@ -341,6 +365,7 @@ module pe_regs #(
           6'h12:   rd = {2'b00, width_q};
           6'h13:   rd = size_i[g*12 +: 8];
           6'h18:   rd = {4'd0, size_i[g*12 + 8 +: 4]};
+          6'h19:   rd = {6'd0, feat_i[g*2 +: 2]};
           6'h14:   rd = crc_val[7:0];
           6'h15:   rd = crc_val[15:8];
           6'h16:   rd = crc_val[23:16];
@@ -372,21 +397,18 @@ module pe_regs #(
   // ------------------------------------------- per-engine values at "e"
   // Selected with an AND-OR so that an engine number above NE-1 reads zero.
   logic [7:0]  ereg_sel, dmem_sel;
-  logic [15:0] hreg_sel;
   logic [31:0] prog_sel;
   logic        run_sel;
   integer      j;
   always_comb begin
     ereg_sel = '0;
     dmem_sel = '0;
-    hreg_sel = '0;
     prog_sel = '0;
     run_sel  = 1'b0;
     for (j = 0; j < NE; j = j + 1) begin
       if (e_hot[j]) begin
         ereg_sel = ereg_rd[j*8 +: 8];
-        dmem_sel = dm_rdata_i[j*8 +: 8];
-        hreg_sel = hreg_rdata_i[j*16 +: 16];
+        dmem_sel = HOST_RB ? dm_rdata_i[j*8 +: 8] : 8'h00;
         prog_sel = prog_rdata_i[j*32 +: 32];
         run_sel  = enable_q[j];
       end
@@ -394,10 +416,10 @@ module pe_regs #(
   end
 
   // -------------------------------------------------- registers r0..r7
-  // The engine stores 16-bit values; the host writes one byte and keeps the
-  // other.
+  // The engine stores 16-bit values; the host writes one byte of one.
   assign hreg_sel_o   = off[3:1];
-  assign hreg_wdata_o = off[0] ? {wdata_i, hreg_sel[7:0]} : {hreg_sel[15:8], wdata_i};
+  assign hreg_hi_o    = off[0];
+  assign hreg_wdata_o = wdata_i;
 
   // ---------------------------------------------------------- data memory
   assign dm_addr_o  = addr_i[3:0];

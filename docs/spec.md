@@ -1,9 +1,16 @@
-# Specification v0.4
+# Specification v0.5
 
 Status: all three parts are implemented and tested in simulation. Part 1 is the
 instruction set (`src/pe_engine.sv`), part 2 the host interface
 (`src/pe_spi.sv`, `src/pe_regs.sv`), part 3 the pins (`src/pe_pins.sv`). Where
 a rule was chosen without a requirement behind it, `docs/decisions.md` says so.
+
+Changes from v0.4 (all made to reduce the number of cells so that the layout
+can be routed; `docs/decisions.md`): engines 0 and 1 have no checksum unit and
+shift by one place only (1.1, 1.5, 1.8); the host can write `r0`..`r7` and the
+data memory but no longer read them (2.3, 2.5); a `FEATURES` register says
+which units an engine has (2.5); the FIFOs and data memories are built from
+latches, with no change in behaviour.
 
 Changes from v0.3: the four engines are no longer the same size (section
 1.1), because four full-size engines could not be routed on the tile. New
@@ -42,10 +49,10 @@ Terms used throughout:
 | `T` | 1 bit | Test flag. Conditional execution looks only at this flag |
 | `Z`, `C` | 1 bit each | Equal and less-than results of the last `cmp` |
 | `wtime` | 16 bits | Ticks the most recent `wait` spent stalled (stops at 0xFFFF) |
-| `crc` | 32 bits | Checksum register (section 1.8) |
+| `crc` | 32 bits | Checksum register (section 1.8). Engines 2 and 3 only |
 | TX FIFO | 8 or 16 bytes | Host to engine |
 | RX FIFO | 8 or 16 bytes | Engine to host |
-| Data memory | 4 or 16 bytes | Flip-flops, reached in one tick by `ld` and `st`; the host can read and write it |
+| Data memory | 4 or 16 bytes | Reached in one tick by `ld` and `st`; the host can write it. Zero after reset |
 
 All engines share eight one-bit flags, `F0`..`F7`, used to signal each other and
 the host.
@@ -59,15 +66,19 @@ over its own instructions.
 
 The engines differ in size:
 
-| Engine | Program memory | FIFOs, each way | Data memory | Intended for |
-|---|---|---|---|---|
-| 0 | 256 words (1,024 bytes) | 8 bytes | 4 bytes | UART, SPI, I2C |
-| 1 | 256 words (1,024 bytes) | 8 bytes | 4 bytes | UART, SPI, I2C |
-| 2 | 512 words (2,048 bytes) | 8 bytes | 4 bytes | Protocols with long frames, held in the memory block |
-| 3 | 256 words (1,024 bytes) | 16 bytes | 16 bytes | Protocols that need more FIFO room, such as low-speed USB |
+| Engine | Program memory | FIFOs, each way | Data memory | Checksum unit | Shifts | Intended for |
+|---|---|---|---|---|---|---|
+| 0 | 256 words (1,024 bytes) | 8 bytes | 4 bytes | no | one place | UART, SPI, I2C |
+| 1 | 256 words (1,024 bytes) | 8 bytes | 4 bytes | no | one place | UART, SPI, I2C |
+| 2 | 512 words (2,048 bytes) | 8 bytes | 4 bytes | yes | 0 to 15 places | Protocols with long frames, held in the memory block |
+| 3 | 256 words (1,024 bytes) | 16 bytes | 16 bytes | yes | 0 to 15 places | Protocols that need more FIFO room, such as low-speed USB |
 
-Everything else is the same in all four, so a program that fits an engine's
-sizes runs on any of them.
+On engines 0 and 1, `shl` and `shr` shift by one place whatever the second
+operand says, the `feed` bit of `in` and `out` has no effect, `crc_lo` and
+`crc_hi` read as zero and writes to them are dropped, and the checksum
+settings and the `CRC` register read as zero. None of this is reported as an
+error. Everything else is the same in all four engines, so a program that fits
+an engine's sizes and units runs on any of them.
 
 ### 1.2 Timing rules
 
@@ -154,7 +165,8 @@ opcode:
 | 15 | `halt` | none | Stop this engine and set its HALTED status bit |
 
 ALU functions: 0 `add`, 1 `sub`, 2 `and`, 3 `or`, 4 `xor`, 5 `shl`, 6 `shr`,
-7 `cmp`. Shifts are logical and use the low 4 bits of the second operand.
+7 `cmp`. Shifts are logical and use the low 4 bits of the second operand (on engines
+0 and 1 they shift by one place regardless; section 1.1).
 `cmp` writes no register; it sets `Z` = (ra equals operand) and `C` = (ra is
 less than operand, unsigned). No other instruction changes `Z` or `C`.
 
@@ -211,8 +223,8 @@ owns (part 2, pin ownership).
 
 ### 1.8 Checksum unit
 
-A 32-bit shift register with feedback, for cyclic redundancy checks of any width
-up to 32. The host sets the polynomial, the width and the direction. Each bit
+Engines 2 and 3 only (section 1.1). A 32-bit shift register with feedback, for
+cyclic redundancy checks of any width up to 32. The host sets the polynomial, the width and the direction. Each bit
 that passes through a one-bit `in` or `out` whose `feed` bit is 1 advances it by
 one step. The program reads and writes the value through `crc_lo` and `crc_hi`.
 
@@ -334,7 +346,7 @@ a transfer that ends part-way through a byte loses nothing.
 |---|---|
 | 0x0000..0x003F | Global registers (2.4) |
 | 0x0100 + 0x40 x e | Registers of engine e (2.5) |
-| 0x0200 + 0x10 x e | Data memory of engine e. A 4-byte memory repeats four times in the 16 addresses |
+| 0x0200 + 0x10 x e | Data memory of engine e, write only (reads return 0). A 4-byte memory repeats four times in the 16 addresses |
 | 0x4000 + 0x800 x e | Program memory of engine e: up to 512 words, 4 bytes each, lowest byte first (a 256-word memory repeats in the upper half). A word is stored when its fourth byte arrives, so writes start at a multiple of 4. Accessible only while the engine's `ENABLE` bit is 0; otherwise writes are ignored and reads return 0 |
 
 Any other address reads as 0 and ignores writes.
@@ -364,12 +376,12 @@ All are 0 after reset, except `ID` and `VERSION`.
 ### 2.5 Engine registers
 
 Offsets from the engine's base address. All are 0 after reset except
-`PULL_THRESH` and `PUSH_THRESH` (8) and `CRC_WIDTH` (32). Settings are meant
+`PULL_THRESH` and `PUSH_THRESH` (8) and, on engines 2 and 3, `CRC_WIDTH` (32). Settings are meant
 to be written while the engine is stopped.
 
 | Offset | Name | Access | Contents |
 |---|---|---|---|
-| 0x00 | `CFG` | read/write | Bit 0 `OUT_DIR`, 1 `IN_DIR`, 2 `AUTOPULL`, 3 `AUTOPUSH`, 4 checksum direction |
+| 0x00 | `CFG` | read/write | Bit 0 `OUT_DIR`, 1 `IN_DIR`, 2 `AUTOPULL`, 3 `AUTOPUSH`, 4 checksum direction (engines 2 and 3; always 0 on the others) |
 | 0x01 | `PULL_THRESH` | read/write | 1 to 8 |
 | 0x02 | `PUSH_THRESH` | read/write | 1 to 8 |
 | 0x03, 0x04 | `CLKDIV` | read/write | Tick length is `CLKDIV + 1` clocks |
@@ -381,12 +393,13 @@ to be written while the engine is stopped.
 | 0x0B | `RX_LEVEL` | read | Bytes in the RX FIFO |
 | 0x0C | `FIFO` | read/write | Write pushes to the TX FIFO; a byte written to a full FIFO is dropped. Read pops from the RX FIFO; an empty FIFO returns an undefined byte. The address does not advance |
 | 0x0D | `DEBUG` | read, write 1 to clear | Bit 0: host wrote to a full TX FIFO. 1: host read an empty RX FIFO. 2: non-blocking pull found the FIFO empty. 3: non-blocking push found it full |
-| 0x0E..0x11 | `CRC_POLY` | read/write | Checksum polynomial, lowest byte first |
-| 0x12 | `CRC_WIDTH` | read/write | 1 to 32 (used by direction 1) |
+| 0x0E..0x11 | `CRC_POLY` | read/write | Checksum polynomial, lowest byte first. Engines 2 and 3; reads 0 on the others |
+| 0x12 | `CRC_WIDTH` | read/write | 1 to 32 (used by direction 1). Engines 2 and 3; reads 0 on the others |
 | 0x13 | `SIZES` | read | Bits 3:0: base-2 logarithm of the program memory's words (8 or 9). Bits 7:4: base-2 logarithm of each FIFO's bytes (3 or 4) |
-| 0x14..0x17 | `CRC` | read | Current checksum value |
+| 0x14..0x17 | `CRC` | read | Current checksum value. Engines 2 and 3; reads 0 on the others |
 | 0x18 | `DM_SIZE` | read | Bits 3:0: base-2 logarithm of the data memory's bytes (2 or 4) |
-| 0x20..0x2F | `R0`..`R7` | read/write | The registers, two bytes each, lowest byte first. Writable while the engine's `ENABLE` bit is 0 |
+| 0x19 | `FEATURES` | read | Bit 0: the engine has a checksum unit. Bit 1: its shifts take 0 to 15 places |
+| 0x20..0x2F | `R0`..`R7` | write | The registers, two bytes each, lowest byte first; each byte is written on its own. Writable while the engine's `ENABLE` bit is 0. Reads return 0: a program reports a register's value by pushing it to its RX FIFO |
 
 ### 2.6 After reset
 

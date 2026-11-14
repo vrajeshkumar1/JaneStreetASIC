@@ -27,6 +27,7 @@ E_CFG, E_PULL_THRESH, E_PUSH_THRESH, E_CLKDIV = 0x00, 0x01, 0x02, 0x03
 E_SIDE0, E_SIDE1, E_PC, E_STATUS = 0x05, 0x06, 0x07, 0x09
 E_TX_LEVEL, E_RX_LEVEL, E_FIFO, E_DEBUG = 0x0A, 0x0B, 0x0C, 0x0D
 E_CRC_POLY, E_CRC_WIDTH, E_SIZES, E_CRC, E_DM_SIZE, E_R0 = 0x0E, 0x12, 0x13, 0x14, 0x18, 0x20
+E_FEATURES = 0x19          # [0] checksum unit, [1] 16-place shifter
 
 # ---- engine STATUS bits
 ST_RUNNING, ST_STALLED, ST_HALTED, ST_ILLEGAL = 0x01, 0x02, 0x04, 0x08
@@ -220,9 +221,20 @@ class Host:
     async def rx_level(self, e):
         return await self.read1(ereg(e, E_RX_LEVEL))
 
+    # The chip does not let the host read r0..r7 or the data memory back (it
+    # can write them). These two look straight at the storage inside the
+    # simulated design, so they work in simulation of the source only; on the
+    # real chip a program reports a value by pushing it to its RX FIFO.
+    def _engine(self, e):
+        return self.w.dut.user_project.g_eng[e].u_engine
+
     async def reg(self, e, n):
-        lo, hi = await self.read(ereg(e, E_R0 + 2 * n), 2)
-        return lo | (hi << 8)
+        return (int(self._engine(e).r_q.value) >> (16 * n)) & 0xFFFF
+
+    async def dm(self, e, offset=0, n=1):
+        v = int(self._engine(e).dm_q.value)
+        out = [(v >> (8 * (offset + i))) & 0xFF for i in range(n)]
+        return out[0] if n == 1 else out
 
     async def set_reg(self, e, n, value):
         await self.write(ereg(e, E_R0 + 2 * n), [value & 0xFF, value >> 8])

@@ -139,6 +139,57 @@ put an adder in front of the memory address, the slowest path in the design),
 the `SIZES` / `DM_SIZE` registers, the `.org` directive, and the block's
 position (same corner as before, y = 514.08).
 
+## Fewer cells (14 Nov 2026)
+
+The unequal-engine design was hardened by the author on an 88-vCPU machine:
+detailed routing stayed at about 9,600 to 11,000 violations after more than 40
+passes. The tile has three routing layers and only Metal3 runs left to right;
+the competition page suggests about 1,000 logic cells per tile (32,000 for
+this project) and the design had 33,231 after the clock tree stage. Moving the
+memory blocks, lowering the placement density and thinning the power stripes
+were tried in the flow and did not remove the overflow, so the cell count was
+reduced instead. The author chose the list; cell counts are from Yosys with
+the flow's area-oriented recipe, before buffering.
+
+| Change | Cells saved | Cost |
+|---|---|---|
+| FIFO and data-memory bytes kept in latches behind clock gates (`pe_lmem` in `src/pe_fifo.sv`) instead of flip-flops with a write multiplexer | 2,250 | 864 latches and 108 clock-gate cells in the design; timing of these paths relies on the flow's latch analysis (below) |
+| No checksum unit on engines 0 and 1 | 1,163 | Those engines cannot compute a CRC in hardware |
+| Shifts by one place only on engines 0 and 1 | 546 | A longer shift takes a loop |
+| Host cannot read `r0`..`r7` or the data memory | 607 | No register visibility for the host on the chip; the whole-chip tests read the storage inside the simulation instead (`reg` and `dm` in `test/host.py`) |
+| Total: 25,358 to 20,792 | 4,566 | |
+
+Not done: moving engine 1's FIFOs into its memory block. The author had
+approved it. A synthesis with engine 1's FIFOs cut from 8 bytes to 2 saved 195
+cells, so removing them entirely saves about 260 before the address counters,
+the two-clock access sequencing and the buffer registers it would need are
+added back, and it would add a rule that engine 1 must leave free clocks for
+host FIFO access. Latches had already taken most of what the move would save.
+
+How the latch storage is kept safe: the byte to store is first captured in a
+flip-flop; the latch enable comes only from a library clock-gate cell
+(`sg13cmos5l_lgcp_1`), whose enable is taken while the clock is low; the
+latches follow the flip-flop for the high half of one clock and close half a
+clock before it can change. Static timing in the flow run reports the latch
+hold check met by 8.4 ns and the clock-gate enable check by 0.5 ns (slow
+corner, placement estimate). The latches have a reset, so the data memory is
+still zero after reset. In simulation the clock gate is a behavioural
+description; `PE_USE_LIB_CELLS` (set in `src/config.json`) selects the cell.
+
+Measured with the real flow run locally up to the clock tree stage, power
+stripes over the memory arrays also removed (`EXTEND_STRIPES_SRAM_ARRAY_EVERY_OTHER`
+false): 26,724 standard cells (33,231 before), of which 1,983 are hold-time
+buffers the earlier run did not insert (it inserted 10; the paths are from
+flip-flops to the memory blocks' inputs and exist in both designs). Metal3 at
+58% of the flow's reduced capacity in a quick three-iteration global route
+(68% before) with an overflow of 4,230 (7,335 before, measured the same way).
+The overflow is lower but not zero; detailed routing has not been run.
+
+Known side effect: the flow's timing-repair step counts the 864 latch inputs
+as setup violations it cannot repair (they borrow time by design and report a
+slack of exactly zero, inside its 0.05 ns margin). It spent about five minutes
+on them and changed nothing.
+
 ## Open questions the probe build answered
 
 All four were answered by the layout run of 12 November 2026: the flow accepts

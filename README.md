@@ -20,9 +20,9 @@ over some design choices.
 | Specification (`docs/spec.md`) | v0.4; all three parts implemented |
 | Assembler (`tools/pasm.py`) | Working |
 | Engine (`src/pe_engine.sv`) | Passes 19 simulation tests |
-| Host interface and four-engine top level (`src/project.sv`, `pe_spi.sv`, `pe_regs.sv`, `pe_pins.sv`) | Passes 14 whole-chip simulation tests |
+| Host interface and four-engine top level (`src/project.sv`, `pe_spi.sv`, `pe_regs.sv`, `pe_pins.sv`) | Passes 15 whole-chip simulation tests |
 | Example programs (`programs/`) | UART, SPI and I2C run in simulation against bus models, on one engine and on four at once |
-| Layout | The probe build passed the flow. Four full-size engines could not be routed (`docs/decisions.md`). The present design has four engines of different sizes; its layout run is pending |
+| Layout | The probe build passed the flow. Four full-size engines could not be routed (`docs/decisions.md`). The design with four engines of different sizes did not route either (about 10,000 violations left). The present design has about 18% fewer cells; its layout run is pending |
 | FPGA prototype, host script for the demo board, low-speed USB program | Not started |
 
 ## Layout of the repository

@@ -23,6 +23,7 @@ CLOCK_NS = 16.666  # 60 MHz
 
 # (program words, FIFO bytes, data memory bytes) of each engine
 SIZES = {0: (256, 8, 4), 1: (256, 8, 4), 2: (512, 8, 4), 3: (256, 16, 16)}
+HAS_CRC = {0: False, 1: False, 2: True, 3: True}   # also the 16-place shifter
 
 
 async def start(dut, half_ns=71):
@@ -48,7 +49,7 @@ async def test_registers(dut):
     assert await h.read(ID, 3) == [0x4A, 0x01, 0x00]
     for e in range(4):
         assert await h.read(ereg(e, E_CFG), 3) == [0x00, 8, 8]
-        assert await h.read1(ereg(e, E_CRC_WIDTH)) == 32
+        assert await h.read1(ereg(e, E_CRC_WIDTH)) == (32 if HAS_CRC[e] else 0)
         assert await h.status(e) == ST_TX_EMPTY | ST_RX_EMPTY
         assert await h.sizes(e) == SIZES[e]
 
@@ -77,12 +78,19 @@ async def test_registers(dut):
         await h.write(dmem(e), mem)
     for e in range(4):
         cfg, crc, regs, mem = expect[e]
+        if not HAS_CRC[e]:                              # no checksum unit:
+            cfg = [cfg[0] & 0x0F] + cfg[1:]             # its settings read as zero
+            crc = [0] * 5
         assert await h.read(ereg(e, E_CFG), 7) == cfg
         assert await h.read(ereg(e, E_CRC_POLY), 5) == crc
-        assert await h.read(ereg(e, E_R0), 16) == regs
-        assert await h.read(dmem(e), len(mem)) == mem
-        if len(mem) < 16:                               # a smaller memory repeats
-            assert await h.read(dmem(e, len(mem)), len(mem)) == mem
+        assert await h.read1(ereg(e, 0x19)) == (3 if HAS_CRC[e] else 0)
+        # r0..r7 and the data memory are write-only for the host: they read as
+        # zero, and the values written are in the storage.
+        assert await h.read(ereg(e, E_R0), 16) == [0] * 16
+        assert await h.read(dmem(e), len(mem)) == [0] * len(mem)
+        assert [await h.reg(e, n) for n in range(8)] == \
+               [regs[2 * n] | (regs[2 * n + 1] << 8) for n in range(8)]
+        assert await h.dm(e, 0, len(mem)) == mem
 
     # Addresses with nothing behind them read as zero.
     assert await h.read(0x0300, 2) == [0, 0]
@@ -155,7 +163,7 @@ async def test_engine_program(dut):
     assert await h.read1(STATUS) == 1 << e
     assert await h.reg(e, 0) == 0x1234 + 6 * 3
     assert await h.reg(e, 1) == 0xFFFF            # "rN--" counts down past zero
-    assert await h.read1(dmem(e, 2)) == 0x46
+    assert await h.dm(e, 2) == 0x46
     assert await h.pc(e) == 5
     # The other engines were not touched.
     for other in (0, 2, 3):
@@ -657,3 +665,37 @@ async def test_illegal_instruction(dut):
     await h.enable(0)
     await h.restart(1 << e)
     assert await h.status(e) == ST_TX_EMPTY | ST_RX_EMPTY
+
+
+@cocotb.test()
+async def test_engine_units(dut):
+    """Engines 0 and 1 have no checksum unit and shift by one place only;
+    engines 2 and 3 have both. The same program gives the matching results."""
+    w, h = await start(dut)
+    src = """
+            set r0, 0x0101
+            shl r1, r0, 3
+            shr r2, r0, 4
+            set r3, 5
+            shl r4, r0, r3
+            set r5, 0xFFFF
+            mov crc_lo, r5
+            mov osr, r0
+            out null, 1, feed
+            mov r6, crc_lo
+            halt
+    """
+    for e in range(4):
+        await h.write(ereg(e, E_CRC_POLY), [0x01, 0xA0, 0, 0, 16])
+        await h.load(e, src)
+    await h.enable(0xF)
+    for e in range(4):
+        await h.wait_halt(e)
+        got = [await h.reg(e, n) for n in (1, 2, 4, 6)]
+        if HAS_CRC[e]:
+            assert got[:3] == [0x0808, 0x0010, 0x2020]
+            assert got[3] not in (0, 0xFFFF)            # one checksum step was taken
+            assert await h.read(ereg(e, 0x14), 2) == [got[3] & 0xFF, got[3] >> 8]
+        else:
+            assert got == [0x0202, 0x0080, 0x0202, 0]
+            assert await h.read(ereg(e, 0x14), 4) == [0, 0, 0, 0]

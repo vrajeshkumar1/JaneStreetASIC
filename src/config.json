@@ -46,9 +46,12 @@
   "PDN_CFG": "dir::pdn_cfg.tcl",
   "ERROR_ON_PDN_VIOLATIONS": 0,
 
-  "//stripes": "Every-other mode: the tile grid's stripe pairs plus a pair on every other column pair of each bit-cell array.",
+  "//stripes": "Only the tile grid's own stripe pairs are extended across the memory blocks; no extra pairs are added over the bit-cell arrays. This halves the Metal4 taken by power around the blocks (19.4% to 12.5% of the layer in a trial) and leaves more Metal4 and Metal2 for signals.",
   "EXTEND_STRIPES_SRAM_ALL_COLUMNS": false,
-  "EXTEND_STRIPES_SRAM_ARRAY_EVERY_OTHER": true,
+  "EXTEND_STRIPES_SRAM_ARRAY_EVERY_OTHER": false,
+
+  "//defines": "PE_USE_LIB_CELLS makes pe_clkgate (src/pe_fifo.sv) use the library's clock-gate cell sg13cmos5l_lgcp_1 instead of its simulation description. The FIFO and data-memory bytes are latches written through these gates.",
+  "VERILOG_DEFINES": ["PE_USE_LIB_CELLS"],
   "EXTEND_STRIPES_PIN_FACE_MARGIN": 0,
   "RUN_CTS": 1,
   "FP_PDN_MULTILAYER": 0,
