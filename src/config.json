@@ -14,11 +14,8 @@
   "PL_ROUTABILITY_DRIVEN": true,
   "//drt": "Increased to 25 after 16 runs ended at 380 violations and falling.",
   "DRT_OPT_ITERS": 25,
-<<<<<<< HEAD
   "//grt": "Global routing reduces each layer's capacity by 15% (the flow's default is 30%). With 30%, the router saw more overflow than the detailed router later found (1,875 on Metal3, resolved to about 40 violations in the open area) and pushed the excess across the memory blocks, which are blocked on every routing layer; those wires can never be made legal and left about 150 violations on the 512-word block after 25 passes. With 15%, on the same placement, Metal3 overflow was 37 and nothing crossed a block. The setting also feeds routability-driven placement; a placement made with it gave an overflow of 40, again with nothing over the blocks.",
   "GRT_ADJUSTMENT": 0.15,
-=======
->>>>>>> 8c4dfdd4011f1a4c3e2f039d942c236c5ca63fdf
   "//clock": "16.66 ns = 60 MHz, the project's target clock.",
   "CLOCK_PERIOD": 16.66,
   "PL_RESIZER_HOLD_SLACK_MARGIN": 0.1,
