@@ -272,6 +272,24 @@ Two other observations from the run:
   times (`DRT_ANTENNA_REPAIR_ITERS`). The second run starts from the first
   run's wiring.
 
+## Capacity reduction of 15% (17 Nov 2026, second run)
+
+The author's run with `GRT_ADJUSTMENT` 0.15: global routing finished with no
+overflow, and the first detailed-routing run ended at 402 violations after 25
+passes (still falling slowly: 498, 497, 402, 402). Only 6 were on a memory
+block. The other 396 were in one area, x = 570 to 750 um and y = 330 to 520 um,
+below the right end of engine 0's block, and 355 of them were Metal2 shorts and
+spacing errors between signal wires. With 30% the same area had been clean;
+there, the open area was down to 38 violations at pass 24. The likely
+reason is placement: routability-driven placement uses the same setting, so at
+15% it predicted less congestion and spread the cells less. After the 25
+passes, 70 nets had antenna violations; 88 diodes were inserted and the second
+routing run stalled at about 1,260.
+
+Change: `GRT_ADJUSTMENT` 0.2. Real flow run locally to the clock tree stage,
+then a quick global route: Metal3 overflow 51, nothing across any block.
+Whether the dense area clears has not been tested.
+
 ## Open questions the probe build answered
 
 All four were answered by the layout run of 12 November 2026: the flow accepts
