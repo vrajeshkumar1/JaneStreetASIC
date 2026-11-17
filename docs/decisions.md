@@ -190,6 +190,45 @@ as setup violations it cannot repair (they borrow time by design and report a
 slack of exactly zero, inside its 0.05 ns margin). It spent about five minutes
 on them and changed nothing.
 
+## Where the violations are (16 Nov 2026)
+
+The reduced design was hardened by the author twice. Without routability-driven
+placement the result was the same as before the reduction: 9,704 violations at
+the best of 32 passes. With it, and with the violation report saved after every
+pass, six passes left 5,849 (20,278 at the same pass without it). This was the
+first time the positions of the violations were available.
+
+| Where | Violations after six passes |
+|---|---|
+| On top of the 512-word block (`u_mem2`, then at the top, x = 273 to 690) | 2,215 |
+| On top of engine 0's block (`u_mem0`) | 123 |
+| Elsewhere, most of it directly under `u_mem2` and to its right (x = 450 to 780) | 3,511 |
+| Right of x = 1,050 (engines 1 and 3 and their blocks) | almost none |
+
+On the block the violations are Metal4 shorts between signal wires and the
+block, its power stripes and the routing blockage. The global router had put
+wires across the block although it is blocked on every layer: with congestion
+allowed it prefers a blocked area to a more congested open one, and the block
+took 191 um of the 711 um of height in the busiest part of the design, with
+`u_mem0` taking another 119 um below it between x = 273 and 420.
+
+Change: the two blocks swap places. The large block is in the bottom-left
+corner and engine 0's block, which is 72 um shorter, is at the top. Measured
+with the real flow to the clock tree stage and a quick three-iteration global
+route, routability-driven placement on in both: Metal3 overflow 3,459 before,
+1,867 after; wiring put across the two blocks 581 track segments before, 257
+after. Three other arrangements on the power-stripe grid were tried and were
+no better than the old one (3,540, 3,748 and 4,801). Detailed routing of the
+new arrangement has not been run.
+
+Open fault: in the author's last run the clock tree step left the clock input
+of two of the 108 clock-gate cells unconnected (`g_eng[2]...u_rx...g_byte[7]`
+and `g_eng[3]...u_tx...g_byte[8]`). The flow reports it at the end as "2
+critical disconnected pins". It did not happen in the author's previous run or
+in seven local runs, and running the clock tree step locally on the same
+placement did not reproduce it, so the cause is not known. A run with this
+error must not be used.
+
 ## Open questions the probe build answered
 
 All four were answered by the layout run of 12 November 2026: the flow accepts
