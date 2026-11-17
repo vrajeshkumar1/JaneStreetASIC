@@ -290,6 +290,45 @@ Change: `GRT_ADJUSTMENT` 0.2. Real flow run locally to the clock tree stage,
 then a quick global route: Metal3 overflow 51, nothing across any block.
 Whether the dense area clears has not been tested.
 
+## First complete run (17 Nov 2026, capacity reduction 20%)
+
+The flow ran to the end for the first time. Results of its checks:
+
+| Check | Result |
+|---|---|
+| Detailed routing | 92 violations, unchanged for the last 10 passes of the third routing run |
+| Antenna | Passed (65 diodes) |
+| KLayout DRC | Passed |
+| LVS | Failed: one short, between pins `A_DIN[31]` and `A_BIST_DIN[31]` of engine 0's block (`u_mem0`) |
+| Hold | Met in all three corners |
+| Setup | Met at typical and fast; slow corner (1.08 V, 125 C) fails by 4.4 ns on 757 paths |
+| Clock gates | All 108 connected |
+
+The 92 violations are in one area, x = 630 to 720 um and y = 430 to 590 um,
+starting at the pin edge of `u_mem0`; 83 of them are Metal2 shorts and spacing
+errors between signal wires. In the global routing of that area Metal2 is at
+90 to 97% of the reduced capacity and Metal3 at 91 to 97%. The cell and pin
+density there is not higher than elsewhere in the design.
+
+Change: `FP_MACRO_VERTICAL_HALO` 10 (was 0.48), so no cells are placed within
+10 um of the edges that carry the blocks' pins. Tested locally to global
+routing: overflow 58 (51 without it), nothing across the blocks. A local test
+cannot show whether the detailed-routing hotspot clears: the run above reported
+almost no global-routing overflow and still left the 92.
+
+Setup at the slow corner: the worst paths start at a memory block. The
+512-word block takes 6.8 ns from clock to data at that corner, and the
+instruction decode after it does not fit in the remaining 9.9 ns. At the
+typical corner every path meets 60 MHz. At the slow corner the limit is
+about 47 MHz (1 / (16.66 + 4.41) ns). The 864 "recovery" endpoints in the
+report are the resets of the storage latches; the latch endpoints themselves
+borrow time by design.
+
+Not examined: 78 maximum-capacitance and 91 maximum-slew warnings at the
+typical corner (317 slew at slow), and 255 "illegal overlap" notes from the
+extraction step, all between the memory blocks' Metal4 obstruction and Metal4
+shapes. The flow does not treat the overlaps as errors.
+
 ## Open questions the probe build answered
 
 All four were answered by the layout run of 12 November 2026: the flow accepts
