@@ -229,6 +229,49 @@ in seven local runs, and running the clock tree step locally on the same
 placement did not reproduce it, so the cause is not known. A run with this
 error must not be used.
 
+## Wires across the memory blocks (17 Nov 2026)
+
+With the blocks of engines 0 and 2 swapped and routability-driven placement,
+the author's run reached 208 violations after 25 detailed-routing passes. The
+violation reports per pass show where the remainder is:
+
+| Pass | On the 512-word block (`u_mem2`) | On engine 0's block (`u_mem0`) | Open area |
+|---|---|---|---|
+| 8 | 187 | 247 | 675 |
+| 16 | 140 | 68 | 148 |
+| 24 | 144 | 26 | 38 |
+
+The open area and `u_mem0` kept falling; `u_mem2` stayed at about 145 for
+ten passes. Those violations come from seven nets whose pins are all outside
+the block (for example `_06740_`, from x = 290 to x = 535 just above the block)
+but whose global-routing guides run through it. The block is blocked on all
+three routing layers, so the detailed router cannot make those wires legal
+whatever the number of passes.
+
+The global router puts wires there only as overflow: with its default 30%
+capacity reduction it saw 1,875 units of Metal3 overflow, while the detailed
+router resolved the open-area part of it to about 40 violations, so the
+reduction is more pessimistic than the real routing. On the author's placement,
+a quick global route with a 15% reduction gave a Metal3 overflow of 37 against
+1,781, and no wire across any block against 260 units of usage over
+`u_mem0` and `u_mem2`. The same setting also changes routability-driven
+placement; a placement made with it (real flow, run locally to the clock tree
+stage) gave an overflow of 40 and nothing across the blocks.
+`GRT_ADJUSTMENT` is now 0.15. Detailed routing with it has not been run.
+
+Two other observations from the run:
+
+- The lines in `error.log` from the power-grid step ("Unconnected instance
+  u_mem*/VDD!", "Check connectivity failed") appear in every run since the
+  first one with memory blocks. The check runs before
+  `Project.ExtendPowerStripes`, which is the step that connects the blocks to
+  the grid (`src/pdn_cfg.tcl`). They are expected at that point; the final
+  layout-versus-schematic check is what confirms the blocks are powered.
+- After the 25 passes the router found 40 antenna violations, inserted 44
+  diodes and started a second full routing run, as the flow does up to three
+  times (`DRT_ANTENNA_REPAIR_ITERS`). The second run starts from the first
+  run's wiring.
+
 ## Open questions the probe build answered
 
 All four were answered by the layout run of 12 November 2026: the flow accepts
