@@ -1,12 +1,17 @@
-; I2C target with a 16-byte register map held in the engine's data memory.
+; I2C target with a 16-byte register map held in the spare part of the
+; engine's own memory block, so it runs on every engine.
 ; Write transfer: address, register pointer, then data bytes (pointer advances).
 ; Read transfer: address, then data bytes from the pointer (pointer advances).
 ; Settings: CLKDIV = 0 (one tick per clock), OUT_DIR = IN_DIR = 1,
 ;           SCL and SDA marked open-drain.
-; The host writes (device address << 1) to r7 before starting the engine.
-; Registers: r0 bit counter, r2 register pointer, r3 byte, r4 scratch, r7 address.
+; The host writes (device address << 1) to r7 before starting the engine, and
+; can set the register map's starting contents by writing program memory
+; words 252..255 (bytes MAP..MAP+15) while the engine is stopped.
+; Registers: r0 bit counter, r2 register pointer, r3 byte, r4 scratch,
+;            r5 byte address of the current register, r7 address.
 .define SCL io6
 .define SDA io7
+.define MAP 1008                     ; byte address of register 0: words 252..255
 
         set pin SCL, 1               ; release both lines
         set pin SDA, 1
@@ -23,15 +28,18 @@ start:  wait pin SCL, 0
         jbit r3.0, 1, rd             ; read/write bit set: controller wants to read
         call rbyte                   ; first written byte = register pointer
         mov r2, isr
+        and r2, r2, 15
         call ack
 wr:     call rbyte                   ; leaves via idle or start on a stop or repeated start
         mov r3, isr
-        st r3, [r2]
+        add r5, r2, MAP
+        stm r3, [r5]
         add r2, r2, 1
         and r2, r2, 15
         call ack
         jmp wr
-rd:     ld r3, [r2]
+rd:     add r5, r2, MAP
+        ldm r3, [r5]
         add r2, r2, 1
         and r2, r2, 15
         mov osr, r3

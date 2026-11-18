@@ -58,8 +58,9 @@ All engines share eight one-bit flags, `F0`..`F7`, used to signal each other and
 the host.
 
 Each engine has its own program memory, one IHP memory block of 256 or 512
-words. A program rarely fills it (the largest example is 55 words), and the
-rest is available to the program as byte-addressed data through `ldm` and
+words. Most programs use a small part of it (the UART, SPI and I2C examples
+take 5 to 58 words; the largest, the USB device, takes 232), and the rest is
+available to the program as byte-addressed data through `ldm` and
 `stm`: byte address A is byte A mod 4 of word A / 4, lowest byte first, the
 same layout the host sees. The hardware does not stop a program from storing
 over its own instructions.

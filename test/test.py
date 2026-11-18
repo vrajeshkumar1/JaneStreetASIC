@@ -17,7 +17,8 @@ from host import (ATTN_MASK, CTRL, DRIVE_OUT, E_CFG, E_CRC_POLY, E_CRC_WIDTH, E_
                   OPEN_DRAIN, OWNER_OUT, ST_HALTED, ST_ILLEGAL, ST_RUNNING, ST_RX_EMPTY,
                   ST_RX_FULL, ST_STALLED, ST_TX_EMPTY, ST_TX_FULL, STATUS, Host, Wires,
                   dmem, ereg, prog, report)
-from models import I2CTargetModel, spi_target
+from models import (I2CControllerModel, I2CTargetModel, USBLowSpeedHostModel, capture_10base_t,
+                    decode_10base_t, link_pulses, spi_target, usb_data, usb_token)
 
 CLOCK_NS = 16.666  # 60 MHz
 
@@ -477,6 +478,253 @@ async def test_four_protocols_at_once(dut):
     assert await h.wait_rx(3, 5) == [0, 0, 0, 0xDE, 0xAD]
     for e in range(4):
         assert not await h.status(e) & (ST_HALTED | ST_ILLEGAL)
+
+
+@cocotb.test()
+async def test_i2c_target_on_small_engine(dut):
+    """i2c_target.s keeps its 16-byte register map in the memory block, so it
+    runs on engine 0 (4-byte data memory). The host sets the map's starting
+    contents and reads the result through program memory."""
+    w, h = await start(dut)
+    MAP_WORD = 252                                   # .define MAP 1008 in the program
+    await h.load_file(0, "i2c_target.s")
+    await h.write(prog(0, MAP_WORD), [0xC0 + a for a in range(16)])
+    await h.configure(0, out_dir=1, in_dir=1)
+    await h.set_reg(0, 7, 0x3A << 1)
+    await h.pins(io={6: 0, 7: 0}, open_drain=[6, 7])
+    await h.enable(0b0001)
+    await h.drive(io=[6, 7])
+    await ClockCycles(dut.clk, 20)
+
+    c = I2CControllerModel(w, half_clocks=75)        # 400 kHz
+    await c.start()
+    assert await c.write(0x3A << 1)
+    assert await c.write(14)
+    for value in (0x11, 0x22, 0x33):                 # registers 14, 15, then 0
+        assert await c.write(value)
+    await c.start()                                  # repeated start, read from 13
+    assert await c.write(0x3A << 1)
+    assert await c.write(13)
+    await c.start()
+    assert await c.write((0x3A << 1) | 1)
+    got = [await c.read(ack=(i < 3)) for i in range(4)]
+    await c.stop()
+    assert got == [0xCD, 0x11, 0x22, 0x33]
+
+    await h.enable(0)
+    assert await h.read(prog(0, MAP_WORD), 16) == \
+        [0x33] + [0xC0 + a for a in range(1, 14)] + [0x11, 0x22]
+
+
+async def usb_device(dut):
+    """Engine 3 running usb_ls_device.s on io4 (D+) and io5 (D-)."""
+    w, h = await start(dut)
+    await h.load_file(3, "usb_ls_device.s")
+    await h.configure(3, side0="io4", side1="io5")
+    await h.write(ereg(3, E_CRC_POLY), [0x01, 0xA0, 0x00, 0x00, 16])   # CRC16, bit-reversed
+    await h.pins(io={4: 3, 5: 3})
+    await h.enable(0b1000)
+    await h.drive(io=[4, 5])
+    return w, h
+
+
+async def usb_exchange(usb, packet, reply_expected=True):
+    """Send a packet, then wait for the device's answer (or check there is none)."""
+    await usb.send(packet)
+    got, gap = await usb.receive(timeout=600)
+    if not reply_expected:
+        assert got is None, f"unexpected reply {got}"
+        return None
+    assert got is not None, "no reply"
+    assert 80 <= gap <= 260, f"reply started {gap} clocks after the end of packet"
+    return got
+
+
+@cocotb.test()
+async def test_usb_low_speed_device(dut):
+    """usb_ls_device.s against a model of a USB host: a control transfer's
+    SETUP stage (token, then DATA0 answered with ACK), an IN token answered
+    with NAK and then with a prepared DATA1 packet, the host's ACK, a data
+    packet with a bad CRC (no answer), long runs of ones (bit stuffing both
+    ways) and a zero-length packet. Each received packet reaches the host
+    through the RX FIFO with its header byte, except IN tokens answered with
+    NAK."""
+    w, h = await usb_device(dut)
+    usb = USBLowSpeedHostModel(w)
+    await ClockCycles(dut.clk, 100)
+    E = 3
+
+    setup = usb_token(0x2D, 0, 0)
+    assert setup == [0x2D, 0x00, 0x10]
+    await usb_exchange(usb, setup, reply_expected=False)
+    hdr, *pkt = await h.collect(E, 4)
+    assert hdr & 0x1F == 3 and pkt == setup
+
+    request = [0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x40, 0x00]      # GET_DESCRIPTOR
+    data0 = usb_data(0xC3, request)
+    assert data0[-2:] == [0xDD, 0x94]
+    assert await usb_exchange(usb, data0) == [0xD2]                   # ACK
+    assert await h.collect(E, 12) == [0x80 | 11] + data0
+
+    # IN before the host has prepared anything: NAK, twice, and not reported.
+    token_in = usb_token(0x69, 0, 0)
+    assert await usb_exchange(usb, token_in) == [0x5A]
+    assert await usb_exchange(usb, token_in) == [0x5A]
+    assert await h.rx_level(E) == 0
+
+    # The host prepares eight bytes of a device descriptor as DATA1.
+    reply = [0x12, 0x01, 0x10, 0x01, 0x00, 0x00, 0x00, 0x08]
+    await h.push(E, [0x80 | 9, 0x4B] + reply)
+    await h.write(FLAGS_SET, 1 << 4)
+    assert await usb_exchange(usb, token_in) == usb_data(0x4B, reply)
+    assert not await h.read1(FLAGS) & (1 << 4), "flag 4 was not cleared"
+    await h.collect(E, 4)
+    await usb.send([0xD2])                                            # host's ACK
+    await ClockCycles(dut.clk, 200)
+    assert await h.collect(E, 2) == [1, 0xD2]
+
+    # A data packet with a broken CRC gets no answer, and its header says so.
+    bad = usb_data(0xC3, request)
+    bad[-1] ^= 0x01
+    await usb_exchange(usb, bad, reply_expected=False)
+    hdr, *pkt = await h.collect(E, 12)
+    assert hdr == 11 and pkt == bad
+
+    # Runs of ones: stuffed bits in both directions.
+    ones = [0xFF] * 8
+    assert await usb_exchange(usb, usb_data(0x4B, ones)) == [0xD2]
+    assert await h.collect(E, 12) == [0x80 | 11] + usb_data(0x4B, ones)
+    await h.push(E, [0x80 | 9, 0xC3] + ones)
+    await h.write(FLAGS_SET, 1 << 4)
+    assert await usb_exchange(usb, token_in) == usb_data(0xC3, ones)
+    await h.collect(E, 4)
+
+    # Zero-length DATA1 (the status stage of a control transfer).
+    await h.push(E, [0x80 | 1, 0x4B])
+    await h.write(FLAGS_SET, 1 << 4)
+    assert await usb_exchange(usb, token_in) == [0x4B, 0x00, 0x00]
+    await h.collect(E, 4)
+    assert not await h.status(E) & (ST_HALTED | ST_ILLEGAL)
+
+
+@cocotb.test()
+async def test_usb_low_speed_clock_tolerance(dut):
+    """The receiver follows a host 1.5% fast or slow (the widest tolerance
+    the USB specification allows a low-speed signal), with D- changing a
+    clock after D+. (Measured separately: it still works at 4.5%.)"""
+    w, h = await usb_device(dut)
+    await ClockCycles(dut.clk, 100)
+    data = [0xFF, 0x00, 0xFF, 0x7E, 0x81, 0xFF, 0xFF, 0x55]
+    for bit_clocks, skew in ((40 * 1.015, 1), (40 * 0.985, 1)):
+        usb = USBLowSpeedHostModel(w, bit_clocks=bit_clocks, skew=skew)
+        packet = usb_data(0xC3, data)
+        assert await usb_exchange(usb, packet) == [0xD2]
+        assert await h.collect(3, 12) == [0x80 | 11] + packet
+
+
+@cocotb.test()
+async def test_ethernet_transmit(dut):
+    """eth_tx.s on engine 2: two frames (the minimum 60 bytes and the maximum
+    1,514) in 10BASE-T Manchester code at 60 MHz: preamble and delimiter,
+    the frame, the FCS computed by the checksum unit, TP_IDL, and link pulses
+    while idle. Every change of TD+ / TD- falls on the 3-clock half-bit grid."""
+    import os
+    import random
+    import zlib
+    import host as host_module
+    w, h = await start(dut)
+    src = open(os.path.join(host_module.ROOT, "programs", "eth_tx.s")).read()
+    # Link pulses every 2,015 ticks instead of 16.4 ms, to keep the run short.
+    src = src.replace("set r7, 0xFFFF", "set r7, 1000").replace(".define NLP_WAITS 14", ".define NLP_WAITS 1")
+    await h.load(2, src)
+    await h.configure(2, side0="out6", side1="out7")
+    await h.write(ereg(2, E_CRC_POLY), [0x20, 0x83, 0xB8, 0xED, 32])
+    await h.pins(out={6: 2, 7: 2})
+    await h.enable(0b0100)
+    await h.drive(out=[6, 7])
+
+    starts, widths = await link_pulses(w, 3)
+    assert widths == [6, 6, 6]                       # 100 ns
+    assert [b - a for a, b in zip(starts, starts[1:])] == [2015, 2015]
+
+    rng = random.Random(10)
+    for length in (60, 1514):
+        frame = [0xFF] * 6 + [0x02, 0x00, 0x00, 0x00, 0x00, 0x01, 0x08, 0x00]
+        frame += [rng.getrandbits(8) for _ in range(length - len(frame))]
+        await h.enable(0)                            # program memory is the host's while stopped
+        padded = frame + [0] * (-len(frame) % 4)
+        await h.write(prog(2, 132), padded)          # byte 528, .define FRAME
+        await h.enable(0b0100)
+        await h.push(2, [length & 0xFF, length >> 8])
+        await h.write(FLAGS_SET, 1 << 5)
+        samples = await capture_10base_t(w)
+        assert samples is not None, "no frame"
+        data, tp_idl = decode_10base_t(samples)
+        fcs = list(zlib.crc32(bytes(frame)).to_bytes(4, "little"))
+        assert data == frame + fcs
+        assert 15 <= tp_idl <= 22, f"TP_IDL {tp_idl} clocks"   # 250 to 375 ns
+    starts, widths = await link_pulses(w, 2)
+    assert widths == [6, 6]
+    assert not await h.status(2) & (ST_HALTED | ST_ILLEGAL)
+
+
+@cocotb.test()
+async def test_micropython_driver(dut):
+    """firmware/pe_host.py, the driver that runs on the board, used as it
+    will be there but over the simulated pins: demo.selftest(), then the USB
+    and Ethernet helpers on engines 3 and 2 at the same time. The driver is
+    blocking code, so it runs in a thread and each SPI byte comes back into
+    the simulation."""
+    import os
+    import sys
+    import zlib
+    import host as host_module
+    from cocotb._bridge import bridge, resume
+    sys.path.insert(0, os.path.join(host_module.ROOT, "firmware"))
+    import demo
+    import make_programs
+    import pe_host
+
+    w, h = await start(dut)
+
+    class SimLink:
+        def __init__(self):
+            self.begin = resume(h._begin)
+            self.end = resume(h._end)
+            self.byte = resume(h._byte)
+
+        def xfer(self, data):
+            return bytearray(self.byte(v) for v in data)
+
+    programs = make_programs.build()
+    chip = pe_host.Chip(SimLink())
+    await bridge(demo.selftest)(chip, programs)
+
+    usb_dev = await bridge(pe_host.USBDevice)(chip, programs)
+    eth = await bridge(pe_host.Ethernet)(chip, programs)
+    assert chip.running == 0b1100
+    usb = USBLowSpeedHostModel(w)
+    await ClockCycles(dut.clk, 100)
+
+    request = [0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x40, 0x00]
+    await usb_exchange(usb, usb_token(0x2D, 0, 0), reply_expected=False)
+    assert await usb_exchange(usb, usb_data(0xC3, request)) == [0xD2]
+    assert (await bridge(usb_dev.packet)())[0] == [0x2D, 0x00, 0x10]
+    assert await bridge(usb_dev.packet)() == (usb_data(0xC3, request), True)
+    assert await bridge(usb_dev.packet)() is None
+
+    frame = [0xFF] * 6 + [0x02, 0x00, 0x00, 0x00, 0x00, 0x01, 0x08, 0x00] + list(range(40))
+    capture = cocotb.start_soon(capture_10base_t(w))
+    await bridge(eth.send)(frame)
+    data, _ = decode_10base_t(await capture)
+    padded = frame + [0] * (60 - len(frame))
+    assert data == padded + list(zlib.crc32(bytes(padded)).to_bytes(4, "little"))
+    assert not await bridge(eth.busy)()
+
+    reply = [0x12, 0x01, 0x10, 0x01, 0x00, 0x00, 0x00, 0x08]
+    await bridge(usb_dev.prepare)(0x4B, reply)
+    assert await usb_exchange(usb, usb_token(0x69, 0, 0)) == usb_data(0x4B, reply)
+    assert (await bridge(usb_dev.packet)())[0] == [0x69, 0x00, 0x10]
 
 
 # ------------------------------------------------------ flags, attention

@@ -1,6 +1,6 @@
 # Decisions
 
-Last updated 12 November 2026. Each entry says what was decided and why, so the
+Last updated 18 November 2026. Each entry says what was decided and why, so the
 reasoning does not have to be reconstructed later.
 
 ## Settled
@@ -345,6 +345,41 @@ Decision: `SETUP_VIOLATION_CORNERS` is set to the typical and fast corners.
 The chip is specified for 60 MHz at typical conditions and about 47 MHz at
 the slow corner (1.08 V, 125 C). Closing the slow corner at 60 MHz would need
 a register after the memory read, which adds a tick to every instruction.
+
+## Programs, host software and FPGA build (18 Nov 2026)
+
+With the layout passing, `src/` is frozen: any change to it means a new
+harden. The work below changes only programs, tests, host software and the
+FPGA build.
+
+| Decision | Reason |
+|---|---|
+| The USB example is a low-speed device on engine 3 (`programs/usb_ls_device.s`) | Settles the deferred "USB example role". A device can be tested against any computer; the RP2350 runs the protocol above the packets |
+| The engine answers within the bus turnaround time by itself (ACK, NAK, prepared data) and reports packets to the host through the RX FIFO, except IN tokens answered with NAK | A host computer repeats a NAKed IN token until the device is ready; reporting each one would fill the 16-byte RX FIFO while the RP2350 is still preparing the answer, and a full FIFO stalls the engine and makes it miss the bus |
+| Ethernet transmit on engine 2 (`programs/eth_tx.s`), with the frame written by the host into the spare part of the 512-word block and read with `ldm` | Uses the block for the purpose it was chosen for. The bit chain is unrolled over the eight bit positions and both bit values, so every bit is exactly 6 ticks; the frame check sequence is computed in a pass over the frame before sending |
+| `i2c_target.s` keeps its register map in the memory block (`ldm` / `stm`) | Runs on engines with 4 bytes of data memory |
+| Divider restart and the attachable buffer (deferred items) will not be added | Both are hardware changes after a passing layout |
+| Host software in MicroPython (`firmware/pe_host.py`) with programs assembled on a PC into a module | The assembler is CPython; the board only needs words and label addresses |
+| The FPGA build replaces the latch storage with flip-flops and the IHP blocks with block RAM, and reads every other source file unchanged | Latches behind clock gates do not map well onto an FPGA. `fpga/sim_fpga_sources.py` runs the whole-chip tests on exactly that source set |
+
+Ethernet receive was not written. Earlier notes called it impossible at
+60 MHz; working through the timing for this write-up gives a narrower
+answer. A Manchester receiver must, after each mid-bit transition, ignore the
+possible transition at the bit boundary 3 clocks later and catch the next
+mid-bit transition 6 clocks later. An engine sees a transition at the first
+clock edge after it plus two synchroniser clocks, so between 2 and 3 clocks
+after it happens. If the next `wait change` takes its reference level 4
+ticks after the previous one ended, that reference falls between 6 and 7
+clocks after the transition and reflects the line 4 to 5 clocks after it:
+after the boundary transition and before the next mid-bit transition, with
+about one clock (16.7 ns) of margin on each side for jitter in the received
+edges. That leaves three instruction ticks per bit between waits: one for
+`in` (with `feed`, so the checksum unit checks the frame check sequence), and
+two that, over a byte, have room for storing the byte with `stm` and the
+end-of-frame check. On paper this fits; it has not been written or
+simulated, and how much of the margin the jitter of a real cable uses has not
+been checked against the standard. The line also needs a receiver outside the
+chip (transformer and comparator).
 
 ## Open questions the probe build answered
 

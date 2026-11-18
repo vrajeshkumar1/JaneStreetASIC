@@ -68,6 +68,28 @@ class Bench:
             d.h_pc_we.value = 0
         return prog
 
+    async def mem_write(self, byte_addr, data):
+        """Write bytes into the memory block at a byte address (a multiple of
+        4), as the host does while the engine is stopped."""
+        d = self.dut
+        assert byte_addr % 4 == 0 and len(data) % 4 == 0
+        for i in range(0, len(data), 4):
+            await FallingEdge(d.clk)
+            d.h_prog_we.value = 1
+            d.h_prog_addr.value = (byte_addr + i) // 4
+            d.h_prog_wdata.value = int.from_bytes(bytes(data[i:i + 4]), "little")
+        await FallingEdge(d.clk)
+        d.h_prog_we.value = 0
+
+    def mem_bytes(self, byte_addr, n):
+        """Bytes of the memory block, read from the simulation model (the
+        engine bench has no host read port for it)."""
+        mem = self.dut.u_mem.i_SRAM_1P_behavioral_bm_bist.memory
+        out = []
+        for a in range(byte_addr, byte_addr + n):
+            out.append((int(mem[a // 4].value) >> (8 * (a % 4))) & 0xFF)
+        return out
+
     async def load_file(self, name, entry=None):
         with open(os.path.join(ROOT, "programs", name)) as f:
             return await self.load(f.read(), entry)

@@ -253,14 +253,14 @@ async def test_i2c_controller(dut):
 @cocotb.test()
 async def test_i2c_target(dut):
     """i2c_target.s at 400 kHz: answers only its own address, stores written
-    bytes in the data memory, reads them back, and follows a repeated start."""
+    bytes in its memory block, reads them back, and follows a repeated start."""
     b = Bench(dut)
     await b.reset()
     await b.load_file("i2c_target.s")
     b.settings(clkdiv=0, out_dir=1, in_dir=1, open_drain=["io6", "io7"])
     await b.set_reg(7, 0x3A << 1)
-    for addr in range(16):
-        await b.dm_write(addr, 0xC0 + addr)
+    MAP = 1008                                      # .define MAP in the program
+    await b.mem_write(MAP, [0xC0 + a for a in range(16)])
     await b.start()
     await ClockCycles(dut.clk, 20)
 
@@ -278,7 +278,7 @@ async def test_i2c_target(dut):
     for value in (0x11, 0x22, 0x33):
         assert await c.write(value)
     await c.stop()
-    assert [await b.dm_read(a) for a in (4, 5, 6, 7, 8)] == [0xC4, 0x11, 0x22, 0x33, 0xC8]
+    assert b.mem_bytes(MAP + 4, 5) == [0xC4, 0x11, 0x22, 0x33, 0xC8]
 
     # Set the pointer to 6, repeated start, read four bytes.
     await c.start()
@@ -297,6 +297,8 @@ async def test_i2c_target(dut):
     assert await c.write(0xAA)
     assert await c.write(0xBB)
     await c.stop()
-    assert await b.dm_read(15) == 0xAA
-    assert await b.dm_read(0) == 0xBB
+    assert b.mem_bytes(MAP + 15, 1) == [0xAA]
+    assert b.mem_bytes(MAP, 1) == [0xBB]
+    assert b.mem_bytes(MAP + 1, 14) == [0xC1, 0xC2, 0xC3, 0xC4, 0x11, 0x22, 0x33,
+                                        0xC8, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCE]
     assert dut.halted.value == 0
