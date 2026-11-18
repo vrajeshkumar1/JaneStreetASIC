@@ -12,8 +12,8 @@
   "SYNTH_STRATEGY": "AREA 0",
   "//routability": "On. Global placement inflates cells where it predicts routing congestion. It made detailed placement fail on the first four-engine design, which was larger; on the present one it completes, and after six routing passes the violation count was 5,849 against 20,278 without it.",
   "PL_ROUTABILITY_DRIVEN": true,
-  "//drt": "Increased to 25 after 16 runs ended at 380 violations and falling.",
-  "DRT_OPT_ITERS": 25,
+  "//drt": "Increased to 40 after 25 runs ended at 37 timing violations and falling.",
+  "DRT_OPT_ITERS": 40,
   "//grt": "Global routing reduces each layer's capacity by 20% (the flow's default is 30%). At 30% the global router saw overflow that did not really exist and pushed seven wires across the 512-word block, leaving about 150 violations there that no number of passes could remove (first run with the swapped blocks). At 15% nothing crossed a block, but routability-driven placement, which uses the same setting, spread the cells less and the detailed router was left with about 400 violations in one dense area below engine 0's block (second run). 20% is between the two; tested locally to global routing it gave a Metal3 overflow of 51 and nothing across the blocks.",
   "GRT_ADJUSTMENT": 0.2,
   "//clock": "16.66 ns = 60 MHz, the project's target clock.",
@@ -171,5 +171,6 @@
     "Metal3 1217.28 585.9 1633.92 704.68",
     "Metal4 1217.28 585.9 1633.92 704.68"
   ],
-  "DRT_SAVE_DRC_REPORT_ITERS": 1
+  "DRT_SAVE_DRC_REPORT_ITERS": 1,
+"GRT_ANTENNA_REPAIR_MARGIN": 30
 }
