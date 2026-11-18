@@ -46,6 +46,26 @@ def prog(e, word=0):
     return 0x4000 + 0x800 * e + 4 * word
 
 
+def report(regs=(), dm=(), one_place=False):
+    """Assembly that sends values to the host through the RX FIFO, then
+    halts: each register in regs as two bytes, low byte first, then each
+    data-memory byte in dm. The host cannot read r0..r7 or the data memory
+    directly, so this is how a test (or a program on the real chip) shows
+    them; it also works on the gate-level netlist, where the storage has no
+    names to look at. It overwrites the registers it sends, and r0 when dm
+    is not empty. one_place: the engine shifts by one place only (engines 0
+    and 1)."""
+    lines = []
+    for n in regs:
+        lines += [f"mov isr, r{n}", "push"]
+        lines += [f"shr r{n}, r{n}, 1"] * 8 if one_place else [f"shr r{n}, r{n}, 8"]
+        lines += [f"mov isr, r{n}", "push"]
+    for a in dm:
+        lines += [f"ld r0, [@{a}]", "mov isr, r0", "push"]
+    lines.append("halt")
+    return "\n".join("            " + line for line in lines) + "\n"
+
+
 def pin(name):
     """Number of a writable pin, as SIDE0/SIDE1 and the instructions use it."""
     kind, n = name[:-1], int(name[-1])
@@ -221,20 +241,23 @@ class Host:
     async def rx_level(self, e):
         return await self.read1(ereg(e, E_RX_LEVEL))
 
-    # The chip does not let the host read r0..r7 or the data memory back (it
-    # can write them). These two look straight at the storage inside the
-    # simulated design, so they work in simulation of the source only; on the
-    # real chip a program reports a value by pushing it to its RX FIFO.
-    def _engine(self, e):
-        return self.w.dut.user_project.g_eng[e].u_engine
+    async def collect(self, e, n, tries=400):
+        """Read n bytes from engine e's RX FIFO, taking them as they arrive.
+        n may be larger than the FIFO: the program stalls on a full FIFO
+        until the host has taken some."""
+        out = []
+        for _ in range(tries):
+            level = await self.rx_level(e)
+            if level:
+                out += await self.pop(e, min(level, n - len(out)))
+            if len(out) >= n:
+                return out
+        raise AssertionError(f"engine {e}: only {len(out)} of {n} bytes arrived")
 
-    async def reg(self, e, n):
-        return (int(self._engine(e).r_q.value) >> (16 * n)) & 0xFFFF
-
-    async def dm(self, e, offset=0, n=1):
-        v = int(self._engine(e).dm_q.value)
-        out = [(v >> (8 * (offset + i))) & 0xFF for i in range(n)]
-        return out[0] if n == 1 else out
+    async def collect_words(self, e, n):
+        """n 16-bit values, sent low byte first (see report())."""
+        b = await self.collect(e, 2 * n)
+        return [b[2 * i] | (b[2 * i + 1] << 8) for i in range(n)]
 
     async def set_reg(self, e, n, value):
         await self.write(ereg(e, E_R0 + 2 * n), [value & 0xFF, value >> 8])

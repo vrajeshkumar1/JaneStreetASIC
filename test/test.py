@@ -16,7 +16,7 @@ from host import (ATTN_MASK, CTRL, DRIVE_OUT, E_CFG, E_CRC_POLY, E_CRC_WIDTH, E_
                   E_FIFO, E_R0, E_TX_LEVEL, FLAGS, FLAGS_CLR, FLAGS_SET, ID,
                   OPEN_DRAIN, OWNER_OUT, ST_HALTED, ST_ILLEGAL, ST_RUNNING, ST_RX_EMPTY,
                   ST_RX_FULL, ST_STALLED, ST_TX_EMPTY, ST_TX_FULL, STATUS, Host, Wires,
-                  dmem, ereg, prog)
+                  dmem, ereg, prog, report)
 from models import I2CTargetModel, spi_target
 
 CLOCK_NS = 16.666  # 60 MHz
@@ -85,12 +85,22 @@ async def test_registers(dut):
         assert await h.read(ereg(e, E_CRC_POLY), 5) == crc
         assert await h.read1(ereg(e, 0x19)) == (3 if HAS_CRC[e] else 0)
         # r0..r7 and the data memory are write-only for the host: they read as
-        # zero, and the values written are in the storage.
+        # zero.
         assert await h.read(ereg(e, E_R0), 16) == [0] * 16
         assert await h.read(dmem(e), len(mem)) == [0] * len(mem)
-        assert [await h.reg(e, n) for n in range(8)] == \
-               [regs[2 * n] | (regs[2 * n + 1] << 8) for n in range(8)]
-        assert await h.dm(e, 0, len(mem)) == mem
+
+    # The values written are in the engines: a program in each sends r0..r7
+    # and its data memory back through the RX FIFO. The settings go back to
+    # one tick per clock and no automatic push first.
+    for e in range(4):
+        await h.configure(e)
+        await h.load(e, report(range(8), range(SIZES[e][2]), one_place=not HAS_CRC[e]))
+    await h.enable(0xF)
+    for e in range(4):
+        _, _, regs, mem = expect[e]
+        assert await h.collect(e, 16 + len(mem)) == regs + mem
+        await h.wait_halt(e)
+    await h.enable(0)
 
     # Addresses with nothing behind them read as zero.
     assert await h.read(0x0300, 2) == [0, 0]
@@ -155,15 +165,15 @@ async def test_engine_program(dut):
             st r0, [@2]
             halt
     alt:    set r0, 0x00AA
+            mov isr, r0
+            push
             halt
-    """)
+    show:
+    """ + report((0, 1), (2,), one_place=True))
     await h.enable(1 << e)
     st = await h.wait_halt(e)
     assert st == ST_HALTED | ST_TX_EMPTY | ST_RX_EMPTY
     assert await h.read1(STATUS) == 1 << e
-    assert await h.reg(e, 0) == 0x1234 + 6 * 3
-    assert await h.reg(e, 1) == 0xFFFF            # "rN--" counts down past zero
-    assert await h.dm(e, 2) == 0x46
     assert await h.pc(e) == 5
     # The other engines were not touched.
     for other in (0, 2, 3):
@@ -172,17 +182,26 @@ async def test_engine_program(dut):
     # Registers and the program counter are closed to the host while ENABLE is set.
     await h.set_reg(e, 0, 0xFFFF)
     await h.set_pc(e, 0)
-    assert await h.reg(e, 0) == 0x1246
     assert await h.pc(e) == 5
 
+    # A restart keeps the registers and the data memory. Run the part that
+    # sends them: r0 still holds the program's result, not the host's 0xFFFF.
     await h.enable(0)
     await h.restart(1 << e)
     assert await h.status(e) == ST_TX_EMPTY | ST_RX_EMPTY
     assert await h.pc(e) == 0
+    await h.set_pc(e, p.labels["show"])
+    await h.enable(1 << e)
+    assert await h.collect_words(e, 2) == [0x1234 + 6 * 3, 0xFFFF]   # "rN--" counts past zero
+    assert await h.collect(e, 1) == [0x46]
+    await h.wait_halt(e)
+
+    await h.enable(0)
+    await h.restart(1 << e)
     await h.set_pc(e, p.labels["alt"])
     await h.enable(1 << e)
+    assert await h.collect(e, 1) == [0xAA]
     await h.wait_halt(e)
-    assert await h.reg(e, 0) == 0x00AA
 
 
 @cocotb.test()
@@ -310,18 +329,17 @@ async def test_memory_block_data(dut):
                 ift stm r0, [r1]      ; skipped
                 ldm r5, [r1]  [3]
                 set r6, 0x77          ; runs after the delay, with the right instruction
-                halt
-        """)
+        """ + report((2, 3, 4, 5, 6), one_place=not HAS_CRC[e]))
         await h.enable(1 << e)
+        assert await h.collect_words(e, 5) == [0x11, 0x44, 0xA5, 0x3C, 0x77]
         await h.wait_halt(e)
-        assert [await h.reg(e, n) for n in (2, 3, 4, 5, 6)] == [0x11, 0x44, 0xA5, 0x3C, 0x77]
         await h.enable(0)
         assert await h.read(prog(e, word), 8) == [0x11, 0x22, 0x33, 0xA5, 0x55, 0x3C, 0x77, 0x88]
         # The program itself is intact.
         await h.restart(1 << e)
         await h.enable(1 << e)
+        assert (await h.collect_words(e, 5))[1] == 0xA5
         await h.wait_halt(e)
-        assert await h.reg(e, 3) == 0xA5
         await h.enable(0)
 
 
@@ -345,20 +363,32 @@ async def test_large_program_memory(dut):
             ret
     entry:  set r0, 0x7000
             halt
-    """)
+    show:
+    """ + report((0, 1, 2)))
     assert p.labels["far"] == 300
     await h.enable(1 << e)
     await h.wait_halt(e)
-    assert [await h.reg(e, n) for n in (0, 1, 2)] == [0x111, 301, 303]
     assert await h.pc(e) == 3
+
+    async def show():
+        """Run the part that sends r0..r2 (a restart keeps the registers)."""
+        await h.enable(0)
+        await h.restart(1 << e)
+        await h.set_pc(e, p.labels["show"])
+        await h.enable(1 << e)
+        words = await h.collect_words(e, 3)
+        await h.wait_halt(e)
+        return words
+
+    assert await show() == [0x111, 301, 303]
     await h.enable(0)
     await h.restart(1 << e)
     await h.set_pc(e, p.labels["entry"])
     assert await h.pc(e) == p.labels["entry"]
     await h.enable(1 << e)
     await h.wait_halt(e)
-    assert await h.reg(e, 0) == 0x7000
     assert await h.pc(e) == p.labels["entry"] + 1
+    assert (await show())[0] == 0x7000
 
 
 # ------------------------------------------------------------- protocols
@@ -633,15 +663,15 @@ async def test_pin_round_trip(dut):
             in pin io0, 1
             in pin io0, 1
             in pin io0, 1
-            mov r0, isr
+            push                  ; the eight samples to the host
             halt
     """)
     await h.configure(0, clkdiv=0, in_dir=0)          # one clock per tick, first bit ends in bit 0
     await h.pins(io={0: 0})
     await h.drive(io=[0])
     await h.enable(1)
+    assert await h.collect(0, 1) == [0b11111000]
     await h.wait_halt(0)
-    assert await h.reg(0, 0) == 0b11111000
 
 
 @cocotb.test()
@@ -654,17 +684,23 @@ async def test_illegal_instruction(dut):
             nop
             set r0, 9
             halt
-    """)
+    show:
+    """ + report((0,)))
     bad = p.words[1] | (3 << 26)
     await h.write(prog(e, 1), [(bad >> s) & 0xFF for s in (0, 8, 16, 24)])
     await h.enable(1 << e)
     st = await h.wait_halt(e)
     assert st & ST_ILLEGAL
     assert await h.pc(e) == 1
-    assert await h.reg(e, 0) == 7
     await h.enable(0)
     await h.restart(1 << e)
     assert await h.status(e) == ST_TX_EMPTY | ST_RX_EMPTY
+    # The first instruction ran and the third did not (a restart keeps the
+    # registers).
+    await h.set_pc(e, p.labels["show"])
+    await h.enable(1 << e)
+    assert await h.collect_words(e, 1) == [7]
+    await h.wait_halt(e)
 
 
 @cocotb.test()
@@ -683,15 +719,14 @@ async def test_engine_units(dut):
             mov osr, r0
             out null, 1, feed
             mov r6, crc_lo
-            halt
     """
     for e in range(4):
         await h.write(ereg(e, E_CRC_POLY), [0x01, 0xA0, 0, 0, 16])
-        await h.load(e, src)
+        await h.load(e, src + report((1, 2, 4, 6), one_place=not HAS_CRC[e]))
     await h.enable(0xF)
     for e in range(4):
+        got = await h.collect_words(e, 4)
         await h.wait_halt(e)
-        got = [await h.reg(e, n) for n in (1, 2, 4, 6)]
         if HAS_CRC[e]:
             assert got[:3] == [0x0808, 0x0010, 0x2020]
             assert got[3] not in (0, 0xFFFF)            # one checksum step was taken

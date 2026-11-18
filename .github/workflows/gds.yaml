@@ -43,7 +43,7 @@ jobs:
           submodules: recursive
 
       - name: GL test
-        uses: TinyTapeout/tt-gds-action/gl_test@ttihp27a
+        uses: TinyTapeout/tt-gds-action/gl_test@ihp-cmos5l
 
   viewer:
     needs: gds

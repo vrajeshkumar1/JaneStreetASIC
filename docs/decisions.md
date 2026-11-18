@@ -156,7 +156,7 @@ the flow's area-oriented recipe, before buffering.
 | FIFO and data-memory bytes kept in latches behind clock gates (`pe_lmem` in `src/pe_fifo.sv`) instead of flip-flops with a write multiplexer | 2,250 | 864 latches and 108 clock-gate cells in the design; timing of these paths relies on the flow's latch analysis (below) |
 | No checksum unit on engines 0 and 1 | 1,163 | Those engines cannot compute a CRC in hardware |
 | Shifts by one place only on engines 0 and 1 | 546 | A longer shift takes a loop |
-| Host cannot read `r0`..`r7` or the data memory | 607 | No register visibility for the host on the chip; the whole-chip tests read the storage inside the simulation instead (`reg` and `dm` in `test/host.py`) |
+| Host cannot read `r0`..`r7` or the data memory | 607 | No register visibility for the host on the chip; a program sends values to the host through its RX FIFO instead (`report()` in `test/host.py`, used by the whole-chip tests since 18 Nov so that they also run on the gate-level netlist) |
 | Total: 25,358 to 20,792 | 4,566 | |
 
 Not done: moving engine 1's FIFOs into its memory block. The author had
