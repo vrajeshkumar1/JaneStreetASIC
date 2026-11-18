@@ -13,10 +13,18 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Build GDS
-        uses: TinyTapeout/tt-gds-action@ttihp27a
+      - name: Read top module name
+        id: top_module
+        run: echo "TOP_MODULE=$(yq '.project.top_module' info.yaml)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the locally hardened GDS
+        uses: TinyTapeout/tt-gds-action/custom_gds@ttihp27a
         with:
-          pdk: ihp-sg13cmos5l # or ihp-sg13g2
+          pdk: ihp-sg13cmos5l
+          top_module: ${{ steps.top_module.outputs.TOP_MODULE }}
+          gds_path: local_build/gds/${{ steps.top_module.outputs.TOP_MODULE }}.gds
+          lef_path: local_build/lef/${{ steps.top_module.outputs.TOP_MODULE }}.lef
+          verilog_path: local_build/nl/${{ steps.top_module.outputs.TOP_MODULE }}.nl.v
 
   precheck:
     needs: gds

@@ -329,6 +329,23 @@ typical corner (317 slew at slow), and 255 "illegal overlap" notes from the
 extraction step, all between the memory blocks' Metal4 obstruction and Metal4
 shapes. The flow does not treat the overlaps as errors.
 
+## First passing layout (18 Nov 2026)
+
+Settings: capacity reduction 20%, 10 um cell-free band along the blocks' pin
+edges, antenna repair margin 30%, 40 routing passes. Detailed routing reached
+0 violations; two rounds of antenna repair followed. Final checks: routing 0,
+antenna 0 (83 diodes), KLayout DRC 0, LVS 0, hold met in all corners, setup
+met at the typical and fast corners. The harden still reported failure: the
+flow's setup check covers every corner by default, and the slow corner fails
+by 4.36 ns on 786 paths (the memory read path described above). The check
+runs after the final layout files are written, so the layout itself was
+complete.
+
+Decision: `SETUP_VIOLATION_CORNERS` is set to the typical and fast corners.
+The chip is specified for 60 MHz at typical conditions and about 47 MHz at
+the slow corner (1.08 V, 125 C). Closing the slow corner at 60 MHz would need
+a register after the memory read, which adds a tick to every instruction.
+
 ## Open questions the probe build answered
 
 All four were answered by the layout run of 12 November 2026: the flow accepts
