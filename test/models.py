@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Models of the other end of the wire, used by the engine tests
 (test/engine) and the whole-chip tests (test/test.py).
 

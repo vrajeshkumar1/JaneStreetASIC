@@ -14,9 +14,8 @@ so they come from the template itself. The tenth is here under another name.
 4. In the clone:
    - delete `src/project.v` (the template's example design);
    - delete `test/Makefile` and rename `test/Makefile.project` to `test/Makefile`;
-   - move the template's `LICENSE` to `LICENSES/Apache-2.0.txt` if asked to
-     replace it; the `LICENSE` in this folder (MIT) is the one to keep at the
-     top level.
+   - keep `LICENSE` (Apache License 2.0) at the top level; it is the licence
+     of the whole project.
 5. Commit and push. Three workflows start:
    - `test` runs the simulation (about a minute);
    - `gds` builds the layout and runs the Tiny Tapeout checks;

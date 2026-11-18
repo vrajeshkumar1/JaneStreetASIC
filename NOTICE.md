@@ -1,9 +1,11 @@
 # Licences in this repository
 
-Original work in this repository is under the MIT licence (`LICENSE`).
+Everything in this repository is under the Apache License 2.0 (`LICENSE`).
+Original work is copyright 2026 Vrajesh Kumar.
 
-The files below come from other projects and stay under the Apache License 2.0
-(`LICENSES/Apache-2.0.txt`). Their copyright and licence notices are kept.
+The files below come from other projects that use the same licence (a second
+copy of its text is in `LICENSES/Apache-2.0.txt`). Their copyright and licence
+notices are kept, and the table says what was changed in each.
 
 | File | Origin | Changes |
 |---|---|---|

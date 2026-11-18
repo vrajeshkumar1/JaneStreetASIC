@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # Build the PYNQ-Z2 bitstream without a Vivado project:
 #     vivado -mode batch -source fpga/build.tcl

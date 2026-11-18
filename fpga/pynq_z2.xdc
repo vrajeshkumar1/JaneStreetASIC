@@ -1,5 +1,5 @@
 ## SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-## SPDX-License-Identifier: MIT
+## SPDX-License-Identifier: Apache-2.0
 ##
 ## PYNQ-Z2 pins for fpga/pynq_z2_top.v. Pin numbers from the PYNQ-Z2 user
 ## manual v1.0: clock (section 5), buttons and LEDs (tables 9 and 11), Pmod A

@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """The five example programs in programs/, each run against a model of the
 other end of the wire."""
 

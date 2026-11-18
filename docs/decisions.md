@@ -26,7 +26,7 @@ reasoning does not have to be reconstructed later.
 | Ethernet | No Ethernet-specific hardware | It is the only listed protocol that instructions cannot handle at 60 MHz |
 | Host for the demo board | RP2350 running Tiny Tapeout's MicroPython firmware | It is what the board ships with. Custom firmware only if a specific need appears |
 | Host for the FPGA prototype | Raspberry Pi Pico (RP2040) running MicroPython | The board is marked 2020; the Pico 2 came out in August 2024. The same host script should carry over to the RP2350 |
-| Licence | MIT for original work | Owner's choice. Template and third-party files stay Apache-2.0 (`NOTICE.md`) |
+| Licence | Apache License 2.0 for the whole repository (original work was MIT until 18 Nov 2026) | Owner's choice. Template and third-party files are under the same licence and keep their notices (`NOTICE.md`) |
 | Work split | Owner: board bring-up, design choices, UVM testbench, small edits. AI tool: RTL, assembler, example programs, the template's minimal tests | Recorded for the write-up |
 
 ## Chosen while writing the specification

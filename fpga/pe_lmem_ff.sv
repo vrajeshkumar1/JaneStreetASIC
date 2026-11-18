@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // FPGA version of pe_lmem (src/pe_fifo.sv): the same storage built from
 // flip-flops with a write enable, because an FPGA has no clock-gate cell and

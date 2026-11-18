@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Host driver for the protocol emulator chip (docs/spec.md, part 2).
 
 Runs under MicroPython on the RP2350 of the Tiny Tapeout demo board, under

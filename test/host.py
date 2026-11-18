@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """The host's side of the chip, for the tests: the wires outside the chip and
 an SPI controller that speaks the host link of docs/spec.md, part 2.
 

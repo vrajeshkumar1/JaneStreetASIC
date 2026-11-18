@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Tests of the whole chip through its pins: the host link, the registers,
 program loading, pin sharing, and several engines running at once.
 

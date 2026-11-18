@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // PYNQ-Z2 (TUL, Zynq XC7Z020) wrapper: the Tiny Tapeout design on the FPGA
 // fabric at the chip's clock, with its 24 pins on the board's headers, so the

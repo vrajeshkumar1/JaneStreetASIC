@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Assemble every program in programs/ into firmware/programs.py, a module of
 plain lists and dicts that MicroPython can import:
 

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // FPGA stand-ins for the two IHP memory blocks (256 x 32 and 512 x 32), with
 // the same ports, so that src/project.sv builds unchanged on the PYNQ-Z2.

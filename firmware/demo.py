@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """First checks on real hardware: the Tiny Tapeout demo board, or a
 MicroPython board wired to the PYNQ-Z2 build (fpga/README.md). Copy
 pe_host.py, programs.py and this file to the board, then

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Byte FIFO. Depth is 2**AW entries. The bytes are kept in latches (pe_lmem
 // below); the pointers and the level are flip-flops.

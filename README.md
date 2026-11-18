@@ -75,5 +75,5 @@ Host software and the FPGA build: see `firmware/README.md` and
 
 ## Licence
 
-MIT for original work. Files taken from other projects keep the Apache License
-2.0; `NOTICE.md` lists them.
+Apache License 2.0 (`LICENSE`). Files taken from other projects are under the
+same licence and keep their own copyright notices; `NOTICE.md` lists them.

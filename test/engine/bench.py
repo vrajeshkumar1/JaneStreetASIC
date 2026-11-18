@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Helpers shared by the engine tests: reset, program loading, settings and
 the host-side FIFO, register and data-memory access of tb_engine.sv."""
 

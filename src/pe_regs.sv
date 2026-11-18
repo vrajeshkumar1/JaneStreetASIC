@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Host-visible registers and the address decoder (docs/spec.md, sections 2.3
 // to 2.5). One side is the byte bus of pe_spi.sv; the other side is the

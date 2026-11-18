@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Run the engine tests:  python test/engine/run.py
 Needs Icarus Verilog and the packages in test/requirements.txt."""
 

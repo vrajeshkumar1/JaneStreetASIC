@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Run the whole-chip tests (test/test.py) on the sources the FPGA build
 uses: pe_fifo.sv without its latch modules, fpga/pe_lmem_ff.sv and
 fpga/fpga_ram.v. This checks the FPGA stand-ins behave like the chip's parts.

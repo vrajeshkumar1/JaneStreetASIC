@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Test bench for one engine. It supplies what the rest of the chip will
 // supply: the program memory block, the settings registers, the shared flags,

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: (c) 2026 Vrajesh Kumar
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Black-box declarations of the two IHP single-port memory blocks the design
 // uses (256 x 32 and 512 x 32), for synthesis only. The blocks are finished
