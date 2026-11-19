@@ -1,6 +1,6 @@
 ![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg)
 
-# JaneStreetASIC
+# ProtocolEmulatorASIC
 
 A programmable protocol emulator for the Jane Street protocol emulator ASIC
 competition, targeting an 8x4 Tiny Tapeout tile on IHP CMOS5L.
