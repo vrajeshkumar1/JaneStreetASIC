@@ -74,6 +74,17 @@ The host is any MicroPython board with `firmware/pe_host.py` (see
 
 The host's I/O must be 3.3 V. `demo.run(link)` is the first check.
 
+The Analog Discovery 3 can be the host instead, from a PC, with
+`firmware/ad3_host.py`: DIO 0 to JA1, DIO 1 to JA2, DIO 2 to JA3, DIO 3 to JB1,
+and ground. `python firmware/ad3_host.py` runs the self-test; `--uart` then
+starts `uart_tx` on `out4`. The AD3's SPI function needed two adjustments,
+both found on the board: at 1 MHz and below it reads the chip's data a bit
+late (the chip changes it shortly after each rising edge, as section 2.1 of
+the specification allows), so the link runs at 4 MHz; and it returns the last
+few bits of each call as 0, so the link sends one bit per SPI word with seven
+padding bits at the end, which the chip discards as an unfinished byte.
+`--sweep`, `--mosi` and `--diag` are the checks used to find these.
+
 ## Protocol checks with the Analog Discovery 3
 
 The Analog Discovery 3 has 16 digital lines at 3.3 V, a logic analyser at up
@@ -93,9 +104,11 @@ UART, SPI, I2C and Manchester codes, among others [2].
 - `python fpga/sim_fpga_sources.py` runs all 20 whole-chip tests in Icarus
   Verilog on the FPGA source set (the stand-ins for the memory blocks and
   latches, with the rest of `src/`); they pass.
-- Vivado has not been run on this build here. Whether it meets 60 MHz on the
-  XC7Z020 is not known until it is; the reports in `fpga/build/` will say.
-- Nothing has been tried on the board.
+- The Vivado build meets timing at 60 MHz on the XC7Z020 (checked in the
+  reports in `fpga/build/`).
+- On the board (19 Nov 2026): the bitstream loads and the self-test passes
+  with the Analog Discovery 3 as the host. The protocol programs have not
+  been tried yet.
 
 ## References
 
